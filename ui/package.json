@@ -1,0 +1,48 @@
+{
+  "name": "hivevoice-ui",
+  "description": "An Aurelia 2 client application.",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "???"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "aurelia": "latest",
+    "@aurelia/router": "latest"
+  },
+  "devDependencies": {
+    "eslint": "^9.17.0",
+    "globals": "^15.14.0",
+    "@aurelia/testing": "latest",
+    "stylelint": "^16.12.0",
+    "stylelint-config-standard": "^36.0.1",
+    "@aurelia/vite-plugin": "latest",
+    "vite": "^6.0.3",
+    "vite-plugin-node-polyfills": "^0.22.0",
+    "vitest": "^2.1.8",
+    "jsdom": "^25.0.1",
+    "tailwindcss": "^4.1.10",
+    "@tailwindcss/vite": "^4.1.10",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "tslib": "^2.8.1",
+    "typescript-eslint": "^8.18.1"
+  },
+  "scripts": {
+    "lint:js": "eslint src test",
+    "lint:css": "stylelint \"src/**/*.css\"",
+    "lint": "npm run lint:js && npm run lint:css",
+    "pretest": "npm run lint",
+    "start": "vite",
+    "build": "vite build",
+    "test": "vitest"
+  },
+  "type": "module",
+  "overrides": {
+    "vite-plugin-node-polyfills": {
+      "vite": "^6.0.0"
+    }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+}
