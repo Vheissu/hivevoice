@@ -1,4 +1,5 @@
 import { IApiService } from '../services/api';
+import { IPaymentService, PaymentRequest, PaymentResponse } from '../services/payment';
 import { resolve } from 'aurelia';
 import { IRouteViewModel } from '@aurelia/router';
 import type { Invoice, SupportedCurrency } from '../types/index';
@@ -7,8 +8,16 @@ export class InvoiceDetail implements IRouteViewModel {
   public invoice: Invoice | null = null;
   public isLoading = true;
   public error = '';
+  public paymentError = '';
+  public paymentSuccess = '';
+  public isProcessingPayment = false;
+  public showPaymentModal = false;
+  private currentInvoiceId = '';
 
-  constructor(private readonly apiService: IApiService = resolve(IApiService)) {}
+  constructor(
+    private readonly apiService: IApiService = resolve(IApiService),
+    private readonly paymentService: IPaymentService = resolve(IPaymentService)
+  ) {}
 
   async canLoad(params: { id?: string }): Promise<boolean> {
     if (!params.id) {
@@ -19,6 +28,7 @@ export class InvoiceDetail implements IRouteViewModel {
   }
 
   async loading(params: { id: string }): Promise<void> {
+    this.currentInvoiceId = params.id;
     await this.loadInvoice(params.id);
   }
 
@@ -73,5 +83,96 @@ export class InvoiceDetail implements IRouteViewModel {
 
   formatConversionDate(timestamp: number): string {
     return new Date(timestamp).toLocaleString();
+  }
+
+  openPaymentModal() {
+    this.showPaymentModal = true;
+    this.paymentError = '';
+    this.paymentSuccess = '';
+  }
+
+  closePaymentModal() {
+    this.showPaymentModal = false;
+  }
+
+  get isHiveKeychainAvailable(): boolean {
+    return this.paymentService.isHiveKeychainAvailable();
+  }
+
+  get canPayInvoice(): boolean {
+    return this.invoice?.status === 'pending' || this.invoice?.status === 'partial';
+  }
+
+  async payWithHiveKeychain(currency: 'HIVE' | 'HBD') {
+    if (!this.invoice || !this.canPayInvoice) {
+      this.paymentError = 'Invoice cannot be paid';
+      return;
+    }
+
+    this.isProcessingPayment = true;
+    this.paymentError = '';
+
+    try {
+      let amount: string;
+      if (currency === 'HIVE' && this.invoice.hiveConversion) {
+        amount = this.invoice.hiveConversion.hiveAmount.toFixed(3);
+      } else if (currency === 'HBD' && this.invoice.hiveConversion) {
+        amount = this.invoice.hiveConversion.hbdAmount.toFixed(3);
+      } else {
+        this.paymentError = 'Conversion rates not available';
+        return;
+      }
+
+      const request: PaymentRequest = {
+        to: this.invoice.clientHiveAddress,
+        amount,
+        currency,
+        memo: `Payment for Invoice ${this.invoice.invoiceNumber}`
+      };
+
+      const response: PaymentResponse = await this.paymentService.payWithHiveKeychain(request);
+      
+      if (response.success) {
+        this.paymentSuccess = response.message;
+        this.closePaymentModal();
+        await this.loadInvoice(this.currentInvoiceId);
+      } else {
+        this.paymentError = response.message;
+      }
+    } catch (error) {
+      this.paymentError = error instanceof Error ? error.message : 'Payment failed';
+    } finally {
+      this.isProcessingPayment = false;
+    }
+  }
+
+  async payWithHiveSigner(currency: 'HIVE' | 'HBD') {
+    if (!this.invoice || !this.canPayInvoice) {
+      this.paymentError = 'Invoice cannot be paid';
+      return;
+    }
+
+    try {
+      let amount: string;
+      if (currency === 'HIVE' && this.invoice.hiveConversion) {
+        amount = this.invoice.hiveConversion.hiveAmount.toFixed(3);
+      } else if (currency === 'HBD' && this.invoice.hiveConversion) {
+        amount = this.invoice.hiveConversion.hbdAmount.toFixed(3);
+      } else {
+        this.paymentError = 'Conversion rates not available';
+        return;
+      }
+
+      const request: PaymentRequest = {
+        to: this.invoice.clientHiveAddress,
+        amount,
+        currency,
+        memo: `Payment for Invoice ${this.invoice.invoiceNumber}`
+      };
+
+      await this.paymentService.payWithHiveSigner(request);
+    } catch (error) {
+      this.paymentError = error instanceof Error ? error.message : 'Payment failed';
+    }
   }
 }

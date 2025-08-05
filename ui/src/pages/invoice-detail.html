@@ -25,7 +25,7 @@
           Print
         </button>
         <a
-          load="/invoices"
+          load="../invoices"
           class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
         >
           Back to Invoices
@@ -145,7 +145,20 @@
 
       <!-- Payment Info -->
       <div class="px-6 py-6 bg-blue-50 border-t border-gray-200">
-        <h3 class="text-lg font-medium text-gray-900 mb-3">Payment Information</h3>
+        <div class="flex justify-between items-start mb-3">
+          <h3 class="text-lg font-medium text-gray-900">Payment Information</h3>
+          <button
+            if.bind="canPayInvoice"
+            click.trigger="openPaymentModal()"
+            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+          >
+            <svg class="-ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+            </svg>
+            Pay Now
+          </button>
+        </div>
+
         <div class="text-sm text-gray-600 space-y-2">
           <p>This invoice is stored on the Hive blockchain for transparency and immutability.</p>
           <p if.bind="invoice.hiveTransactionId">Transaction ID: <span class="font-mono text-xs">${invoice.hiveTransactionId}</span></p>
@@ -156,6 +169,130 @@
               <li if.bind="invoice.hiveConversion">• HIVE: ${invoice.hiveConversion.hiveAmount.toFixed(3)} HIVE</li>
               <li if.bind="invoice.hiveConversion">• HBD: ${invoice.hiveConversion.hbdAmount.toFixed(2)} HBD (Hive Backed Dollars)</li>
             </ul>
+          </div>
+
+          <!-- Payment Success Message -->
+          <div if.bind="paymentSuccess" class="mt-4 p-3 bg-green-50 border border-green-200 rounded-md">
+            <div class="flex">
+              <svg class="flex-shrink-0 h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div class="ml-3">
+                <p class="text-sm text-green-800">${paymentSuccess}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Payment Modal -->
+<div if.bind="showPaymentModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+  <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+    <div class="mt-3">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-medium text-gray-900">Pay Invoice</h3>
+        <button click.trigger="closePaymentModal()" class="text-gray-400 hover:text-gray-600">
+          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Payment Error -->
+      <div if.bind="paymentError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+        <div class="flex">
+          <svg class="flex-shrink-0 h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div class="ml-3">
+            <p class="text-sm text-red-800">${paymentError}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <p class="text-sm text-gray-600 mb-3">Choose your payment method:</p>
+          
+          <!-- HiveKeychain Payment Options -->
+          <div if.bind="isHiveKeychainAvailable && invoice.hiveConversion" class="space-y-2 mb-4">
+            <p class="text-sm font-medium text-gray-700">Pay with Hive Keychain:</p>
+            
+            <button
+              click.trigger="payWithHiveKeychain('HIVE')"
+              disabled.bind="isProcessingPayment"
+              class="w-full flex items-center justify-between px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div class="flex items-center">
+                <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTMuMDkgOC4yNkwyMCA5TDEzLjA5IDE1Ljc0TDEyIDIyTDEwLjkxIDE1Ljc0TDQgOUwxMC45MSA4LjI2TDEyIDJaIiBmaWxsPSIjRTMxMzM3Ii8+Cjwvc3ZnPgo=" alt="HIVE" class="w-5 h-5 mr-2">
+                <span class="text-sm font-medium">Pay with HIVE</span>
+              </div>
+              <span class="text-sm text-gray-600">${invoice.hiveConversion.hiveAmount.toFixed(3)} HIVE</span>
+            </button>
+
+            <button
+              click.trigger="payWithHiveKeychain('HBD')"
+              disabled.bind="isProcessingPayment"
+              class="w-full flex items-center justify-between px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div class="flex items-center">
+                <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTMuMDkgOC4yNkwyMCA5TDEzLjA5IDE1Ljc0TDEyIDIyTDEwLjkxIDE1Ljc0TDQgOUwxMC45MSA4LjI2TDEyIDJaIiBmaWxsPSIjMDA5NjQ4Ii8+Cjwvc3ZnPgo=" alt="HBD" class="w-5 h-5 mr-2">
+                <span class="text-sm font-medium">Pay with HBD</span>
+              </div>
+              <span class="text-sm text-gray-600">${invoice.hiveConversion.hbdAmount.toFixed(3)} HBD</span>
+            </button>
+          </div>
+
+          <!-- HiveSigner Payment Options -->
+          <div if.bind="invoice.hiveConversion" class="space-y-2 mb-4">
+            <p class="text-sm font-medium text-gray-700">Pay with HiveSigner:</p>
+            
+            <button
+              click.trigger="payWithHiveSigner('HIVE')"
+              disabled.bind="isProcessingPayment"
+              class="w-full flex items-center justify-between px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div class="flex items-center">
+                <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTMuMDkgOC4yNkwyMCA5TDEzLjA5IDE1Ljc0TDEyIDIyTDEwLjkxIDE1Ljc0TDQgOUwxMC45MSA4LjI2TDEyIDJaIiBmaWxsPSIjRTMxMzM3Ii8+Cjwvc3ZnPgo=" alt="HIVE" class="w-5 h-5 mr-2">
+                <span class="text-sm font-medium">Pay with HIVE (HiveSigner)</span>
+              </div>
+              <span class="text-sm text-gray-600">${invoice.hiveConversion.hiveAmount.toFixed(3)} HIVE</span>
+            </button>
+
+            <button
+              click.trigger="payWithHiveSigner('HBD')"
+              disabled.bind="isProcessingPayment"
+              class="w-full flex items-center justify-between px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div class="flex items-center">
+                <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTMuMDkgOC4yNkwyMCA5TDEzLjA5IDE1Ljc0TDEyIDIyTDEwLjkxIDE1Ljc0TDQgOUwxMC45MSA4LjI2TDEyIDJaIiBmaWxsPSIjMDA5NjQ4Ii8+Cjwvc3ZnPgo=" alt="HBD" class="w-5 h-5 mr-2">
+                <span class="text-sm font-medium">Pay with HBD (HiveSigner)</span>
+              </div>
+              <span class="text-sm text-gray-600">${invoice.hiveConversion.hbdAmount.toFixed(3)} HBD</span>
+            </button>
+          </div>
+
+          <!-- No Keychain Warning -->
+          <div if.bind="!isHiveKeychainAvailable" class="p-3 bg-yellow-50 border border-yellow-200 rounded-md mb-4">
+            <div class="flex">
+              <svg class="flex-shrink-0 h-5 w-5 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <div class="ml-3">
+                <p class="text-sm text-yellow-800">
+                  Hive Keychain not detected. Install the browser extension for a better experience, or use HiveSigner below.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Loading State -->
+          <div if.bind="isProcessingPayment" class="flex items-center justify-center py-4">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <span class="ml-2 text-sm text-gray-600">Processing payment...</span>
           </div>
         </div>
       </div>

@@ -3,7 +3,7 @@ import { resolve } from 'aurelia';
 import { IRouter } from '@aurelia/router';
 import { IValidationRules } from '@aurelia/validation';
 import { IHiveAuthService } from '../services/hive-auth';
-import type { CreateInvoiceRequest, CreateInvoiceItem, Invoice, CurrencyRate, ConvertAmountResponse, SupportedCurrency } from '../types/index';
+import type { CreateInvoiceRequest, CreateInvoiceItem, Invoice, CurrencyRate, ConvertAmountResponse } from '../types/index';
 
 export class InvoiceCreate {
   public invoice: CreateInvoiceRequest = {

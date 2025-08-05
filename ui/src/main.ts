@@ -6,6 +6,7 @@ import { MyApp } from './my-app';
 import { IApiService } from './services/api';
 import { IAuthService } from './services/auth';
 import { IInvoiceService } from './services/invoice';
+import { IPaymentService } from './services/payment';
 
 Aurelia
   .register(
@@ -16,7 +17,8 @@ Aurelia
     HttpClientConfiguration,
     IApiService,
     IAuthService,
-    IInvoiceService
+    IInvoiceService,
+    IPaymentService
   )
   .app(MyApp)
   .start();

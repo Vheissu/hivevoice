@@ -11,7 +11,9 @@
     "@aurelia/fetch-client": "^2.0.0-beta.25",
     "@aurelia/router": "latest",
     "@aurelia/validation": "^2.0.0-beta.25",
-    "aurelia": "latest"
+    "aurelia": "latest",
+    "hivesigner": "^3.3.4",
+    "keychain-sdk": "^0.9.4"
   },
   "devDependencies": {
     "@aurelia/testing": "latest",
