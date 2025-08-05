@@ -372,6 +372,7 @@ export function getPaymentMonitor(): PaymentMonitorService {
       username: process.env.HIVE_USERNAME || '',
       postingKey: process.env.HIVE_POSTING_KEY || '',
       activeKey: process.env.HIVE_ACTIVE_KEY,
+      memoKey: process.env.HIVE_MEMO_KEY,
       nodes: process.env.HIVE_NODES?.split(',') || ['https://api.hive.blog']
     })
   }

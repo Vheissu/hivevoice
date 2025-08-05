@@ -6,6 +6,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { db } from '../database/schema.js'
 import { hiveService } from '../services/hive.js'
 import { currencyService } from '../services/currency.js'
+import { decryptJSON } from '../utils/memo-crypto.js'
 
 const invoices = new Hono()
 
@@ -61,6 +62,156 @@ invoices.post('/convert', zValidator('json', convertCurrencySchema), async (c) =
   }
 })
 
+/**
+ * Helper function to build invoice response with encrypted data handling
+ * @param invoiceData - Raw invoice data from database
+ * @param items - Invoice items
+ * @returns Complete invoice object with decrypted fields if possible
+ */
+async function buildInvoiceResponse(invoiceData: any, items: any[]): Promise<Invoice> {
+  const hiveConversion: HiveConversion | undefined = 
+    invoiceData.hive_conversion_data ? JSON.parse(invoiceData.hive_conversion_data) : undefined
+
+  // Base invoice object from stored fields
+  let invoice: Invoice = {
+    id: invoiceData.id,
+    invoiceNumber: invoiceData.invoice_number,
+    clientName: invoiceData.client_name,
+    clientHiveAddress: invoiceData.client_hive_address,
+    subtotal: invoiceData.subtotal,
+    tax: invoiceData.tax,
+    total: invoiceData.total,
+    currency: invoiceData.currency || 'USD',
+    hiveConversion,
+    status: invoiceData.status,
+    createdAt: new Date(invoiceData.created_at),
+    updatedAt: new Date(invoiceData.updated_at),
+    dueDate: new Date(invoiceData.due_date),
+    hiveTransactionId: invoiceData.hive_transaction_id,
+    items: items.map(item => ({
+      id: item.id,
+      description: item.description,
+      quantity: item.quantity,
+      unitPrice: item.unit_price,
+      total: item.total
+    }))
+  }
+
+  // Handle encrypted data if present
+  if (invoiceData.encrypted_data && hiveService.instance.hasMemoKey()) {
+    try {
+      console.log('Attempting to decrypt invoice data:', {
+        invoiceId: invoiceData.id,
+        hasEncryptedData: !!invoiceData.encrypted_data,
+        hasMemoKey: hiveService.instance.hasMemoKey()
+      })
+
+      // Get client's public memo key
+      const clientPublicMemoKey = await hiveService.instance.getMemoPublicKey(invoiceData.client_hive_address)
+      
+      if (clientPublicMemoKey && process.env.HIVE_MEMO_KEY) {
+        // Decrypt using server private memo key and client public memo key
+        const decryptedData = decryptJSON(
+          invoiceData.encrypted_data,
+          process.env.HIVE_MEMO_KEY, // server private memo key
+          clientPublicMemoKey // client public memo key
+        ) as Partial<Invoice>
+
+        // Merge decrypted fields with base invoice
+        invoice = { ...invoice, ...decryptedData }
+        
+        console.log('✅ Successfully decrypted invoice data:', {
+          invoiceId: invoiceData.id,
+          decryptedFields: Object.keys(decryptedData)
+        })
+      } else {
+        console.warn('⚠️ Cannot decrypt - missing client public memo key:', {
+          invoiceId: invoiceData.id,
+          clientHiveAddress: invoiceData.client_hive_address,
+          hasClientMemoKey: !!clientPublicMemoKey,
+          hasServerMemoKey: !!process.env.HIVE_MEMO_KEY
+        })
+        
+        // Return original stored fields and encrypted data string for frontend handling
+        invoice.encryptedData = invoiceData.encrypted_data
+      }
+    } catch (decryptError) {
+      console.error('❌ Failed to decrypt invoice data:', {
+        invoiceId: invoiceData.id,
+        error: decryptError instanceof Error ? decryptError.message : String(decryptError)
+      })
+      
+      // On failure, return original stored fields and encrypted data string for frontend handling
+      invoice.encryptedData = invoiceData.encrypted_data
+    }
+  } else if (!invoiceData.encrypted_data && invoiceData.hive_transaction_id) {
+    // Lazy-fetch from chain if encrypted_data not present but hive_transaction_id exists
+    try {
+      console.log('Lazy-fetching encrypted invoice from blockchain:', {
+        invoiceId: invoiceData.id,
+        hiveTransactionId: invoiceData.hive_transaction_id
+      })
+
+      const encryptedPayload = await hiveService.instance.fetchEncryptedInvoice(invoiceData.id)
+      
+      if (encryptedPayload) {
+        console.log('✅ Retrieved encrypted data from blockchain:', {
+          invoiceId: invoiceData.id,
+          payloadLength: encryptedPayload.length
+        })
+
+        // Cache encrypted data in database
+        await db.run(`
+          UPDATE invoices 
+          SET encrypted_data = ?, updated_at = ?
+          WHERE id = ?
+        `, [encryptedPayload, new Date().toISOString(), invoiceData.id])
+
+        // Now try to decrypt the fetched data
+        if (hiveService.instance.hasMemoKey()) {
+          try {
+            const clientPublicMemoKey = await hiveService.instance.getMemoPublicKey(invoiceData.client_hive_address)
+            
+            if (clientPublicMemoKey && process.env.HIVE_MEMO_KEY) {
+              const decryptedData = decryptJSON(
+                encryptedPayload,
+                process.env.HIVE_MEMO_KEY,
+                clientPublicMemoKey
+              ) as Partial<Invoice>
+
+              // Merge decrypted fields
+              invoice = { ...invoice, ...decryptedData }
+              
+              console.log('✅ Successfully decrypted lazy-fetched invoice data:', {
+                invoiceId: invoiceData.id,
+                decryptedFields: Object.keys(decryptedData)
+              })
+            } else {
+              // Store encrypted data for frontend handling
+              invoice.encryptedData = encryptedPayload
+            }
+          } catch (decryptError) {
+            console.error('❌ Failed to decrypt lazy-fetched invoice data:', decryptError)
+            invoice.encryptedData = encryptedPayload
+          }
+        } else {
+          // No memo key available, store encrypted data for frontend
+          invoice.encryptedData = encryptedPayload
+        }
+      } else {
+        console.warn('⚠️ No encrypted data found on blockchain for invoice:', invoiceData.id)
+      }
+    } catch (fetchError) {
+      console.error('❌ Failed to lazy-fetch encrypted invoice from blockchain:', {
+        invoiceId: invoiceData.id,
+        error: fetchError instanceof Error ? fetchError.message : String(fetchError)
+      })
+    }
+  }
+
+  return invoice
+}
+
 // Apply auth middleware to all remaining routes
 invoices.use('*', authMiddleware)
 
@@ -83,48 +234,22 @@ invoices.get('/', async (c) => {
     // Get all invoices from database
     const invoicesData = await db.all(`
       SELECT 
-        id, invoice_number, client_name, client_hive_address,
+        id, invoice_number, client_name, client_hive_address, encrypted_data,
         subtotal, tax, total, currency, hive_conversion_data, status, created_at, updated_at, due_date, hive_transaction_id
       FROM invoices 
       ORDER BY created_at DESC
     `) as any[]
 
-    // Get items for each invoice and build complete invoice objects
-    const invoices: Invoice[] = []
-    for (const invoiceData of invoicesData) {
+    // Use Promise.all to build all invoice responses concurrently
+    const invoices: Invoice[] = await Promise.all(invoicesData.map(async (invoiceData) => {
       const items = await db.all(`
         SELECT id, description, quantity, unit_price, total 
         FROM invoice_items 
         WHERE invoice_id = ?
       `, [invoiceData.id]) as any[]
 
-      const hiveConversion: HiveConversion | undefined = 
-        invoiceData.hive_conversion_data ? JSON.parse(invoiceData.hive_conversion_data) : undefined
-
-      invoices.push({
-        id: invoiceData.id,
-        invoiceNumber: invoiceData.invoice_number,
-        clientName: invoiceData.client_name,
-        clientHiveAddress: invoiceData.client_hive_address,
-        subtotal: invoiceData.subtotal,
-        tax: invoiceData.tax,
-        total: invoiceData.total,
-        currency: invoiceData.currency || 'USD',
-        hiveConversion,
-        status: invoiceData.status,
-        createdAt: new Date(invoiceData.created_at),
-        updatedAt: new Date(invoiceData.updated_at),
-        dueDate: new Date(invoiceData.due_date),
-        hiveTransactionId: invoiceData.hive_transaction_id,
-        items: items.map(item => ({
-          id: item.id,
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unit_price,
-          total: item.total
-        }))
-      })
-    }
+      return buildInvoiceResponse(invoiceData, items)
+    }))
 
     return c.json({ invoices })
   } catch (error) {
@@ -140,7 +265,7 @@ invoices.get('/:id', async (c) => {
     // Get invoice from database
     const invoiceData = await db.get(`
       SELECT 
-        id, invoice_number, client_name, client_hive_address,
+        id, invoice_number, client_name, client_hive_address, encrypted_data,
         subtotal, tax, total, currency, hive_conversion_data, status, created_at, updated_at, due_date, hive_transaction_id
       FROM invoices 
       WHERE id = ?
@@ -157,32 +282,8 @@ invoices.get('/:id', async (c) => {
       WHERE invoice_id = ?
     `, [id]) as any[]
 
-    const hiveConversion: HiveConversion | undefined = 
-      invoiceData.hive_conversion_data ? JSON.parse(invoiceData.hive_conversion_data) : undefined
-
-    const invoice: Invoice = {
-      id: invoiceData.id,
-      invoiceNumber: invoiceData.invoice_number,
-      clientName: invoiceData.client_name,
-      clientHiveAddress: invoiceData.client_hive_address,
-      subtotal: invoiceData.subtotal,
-      tax: invoiceData.tax,
-      total: invoiceData.total,
-      currency: invoiceData.currency || 'USD',
-      hiveConversion,
-      status: invoiceData.status,
-      createdAt: new Date(invoiceData.created_at),
-      updatedAt: new Date(invoiceData.updated_at),
-      dueDate: new Date(invoiceData.due_date),
-      hiveTransactionId: invoiceData.hive_transaction_id,
-      items: items.map(item => ({
-        id: item.id,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unit_price,
-        total: item.total
-      }))
-    }
+    // Build invoice response with encryption handling
+    const invoice = await buildInvoiceResponse(invoiceData, items)
 
     return c.json({ invoice })
   } catch (error) {
@@ -272,6 +373,31 @@ invoices.post('/', zValidator('json', createInvoiceSchema), async (c) => {
       createdAt: new Date(),
       updatedAt: new Date(),
       dueDate: data.dueDate
+    }
+    
+    // Try to store encrypted invoice data on Hive blockchain
+    try {
+      const { txId, encryptedPayload } = await hiveService.instance.storeEncryptedInvoice(invoice, data.clientHiveAddress)
+      
+      // Update the database with the transaction ID and encrypted data
+      await db.run(`
+        UPDATE invoices 
+        SET hive_transaction_id = ?, encrypted_data = ?, updated_at = ?
+        WHERE id = ?
+      `, [txId, encryptedPayload, new Date().toISOString(), invoiceId])
+      
+      // Update the invoice object for the response
+      invoice.hiveTransactionId = txId
+      
+      console.log('✅ Invoice encrypted and stored on Hive blockchain:', {
+        invoiceId,
+        txId,
+        clientHiveAddress: data.clientHiveAddress
+      })
+      
+    } catch (encryptionError) {
+      // Log the error but continue - SQLite record is still valid for backward compatibility
+      console.warn('⚠️ Failed to encrypt/store invoice on Hive blockchain (SQLite record preserved):', encryptionError)
     }
     
     return c.json({ invoice }, 201)

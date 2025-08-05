@@ -32,6 +32,7 @@ export interface HiveConfig {
   username: string
   postingKey: string
   activeKey?: string
+  memoKey?: string
   nodes: string[]
 }
 
