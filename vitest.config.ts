@@ -5,6 +5,14 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: './test/setup.ts',
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/cypress/**',
+      '**/.{idea,git,cache,output,temp}/**',
+      '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*',
+      'ui/test/**'
+    ],
   },
 });
 
