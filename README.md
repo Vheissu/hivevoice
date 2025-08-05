@@ -37,7 +37,6 @@ A self‑hosted invoicing system that writes invoices directly to the Hive block
 ## To implement TODO list
 
 - When installing dependencies, always use `@latest` versions of packages by running `npm install` commands.
-- Create Aurelia 2 application in `ui` directory using `npx makes aurelia` - ensure it's Typescript, Vite and CSS.
 - The UI needs to be beautiful and allow for all things that standard invoice creation would have. Uses the `@aurelia/validation` library for validation, etc. 
 - Server will poll the Hive blockchain, but also have a lightweight Hono API for the front-end.
 - Allows visibility into invoices on chain
