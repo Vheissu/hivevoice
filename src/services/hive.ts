@@ -413,11 +413,10 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
     try {
       console.log('Fetching encrypted invoice post:', { invoiceId })
 
-      // Get posts by the account in the hivevoice-invoices category
-      const posts = await this.client.database.getDiscussionsByBlog({
-        tag: this.config.username,
-        start_author: '',
-        start_permlink: '',
+      // Get posts by the account using Bridge API
+      const posts = await this.client.call('bridge', 'get_account_posts', {
+        account: this.config.username,
+        sort: 'blog',
         limit: 100
       })
 
@@ -458,12 +457,11 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
         }
       }
 
-      // If not found in blog posts, try searching by discussions in category
+      // If not found in blog posts, try searching by category using Bridge API
       try {
-        const categoryPosts = await this.client.database.getDiscussionsByCreated({
+        const categoryPosts = await this.client.call('bridge', 'get_ranked_posts', {
+          sort: 'created',
           tag: 'hivevoice-invoices',
-          start_author: '',
-          start_permlink: '',
           limit: 100
         })
 
