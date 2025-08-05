@@ -29,8 +29,10 @@ export class HiveService {
     return result.id
   }
 
-  async getInvoicePayments(_invoiceId: string): Promise<unknown[]> {
-    return []
+  async getInvoicePayments(invoiceId: string): Promise<import('../types/index.js').InvoicePayment | null> {
+    // Import here to avoid circular dependency
+    const { paymentMonitor } = await import('./payment-monitor.js')
+    return paymentMonitor.instance.getInvoicePayments(invoiceId)
   }
 
   async getBlockchainHeight(): Promise<number> {

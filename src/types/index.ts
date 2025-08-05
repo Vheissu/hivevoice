@@ -85,3 +85,27 @@ export interface HiveConversion {
   }
   timestamp: number
 }
+
+export interface Payment {
+  id: number
+  invoiceId: string
+  fromAccount: string
+  amount: number
+  currency: 'HIVE' | 'HBD'
+  blockNumber: number
+  transactionId: string
+  createdAt: Date
+}
+
+export interface InvoicePayment {
+  invoiceId: string
+  payments: Payment[]
+  totalPaid: {
+    hive: number
+    hbd: number
+  }
+  amountDue: {
+    hive: number
+    hbd: number
+  }
+}

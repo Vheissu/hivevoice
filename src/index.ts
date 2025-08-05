@@ -18,6 +18,7 @@ import auth from './api/auth.js'
 import dashboard from './api/dashboard.js'
 import { db } from './database/schema.js'
 import { hiveService } from './services/hive.js'
+import { paymentMonitor } from './services/payment-monitor.js'
 
 const app = new Hono()
 
@@ -57,6 +58,15 @@ async function startServer() {
     const isValid = await hiveService.instance.validateConfig()
     if (isValid) {
       console.log('✅ Hive service initialized')
+      
+      // Initialize and start payment monitoring
+      try {
+        await paymentMonitor.instance.initialize()
+        await paymentMonitor.instance.startMonitoring()
+        console.log('✅ Payment monitoring service started')
+      } catch (error) {
+        console.error('⚠️ Payment monitoring failed to start:', error)
+      }
     } else {
       console.log('⚠️ Hive service validation failed - blockchain features may not work')
     }

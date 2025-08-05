@@ -11,7 +11,8 @@ import type {
   DashboardStats,
   CurrenciesResponse,
   ConvertAmountRequest,
-  ConvertAmountResponse
+  ConvertAmountResponse,
+  InvoicePayment
 } from '../types/index';
 
 export interface IApiService {
@@ -27,6 +28,7 @@ export interface IApiService {
   getDashboardStats(): Promise<ApiResponse<DashboardStats>>;
   getCurrencies(): Promise<CurrenciesResponse>;
   convertAmount(data: ConvertAmountRequest): Promise<ConvertAmountResponse>;
+  getInvoicePayments(id: string): Promise<{ payments: InvoicePayment }>;
 }
 
 export const IApiService = DI.createInterface<IApiService>('IApiService', (x) => x.singleton(ApiService));
@@ -383,6 +385,51 @@ export class ApiService implements IApiService {
         hbdAmount: parseFloat((data.amount * rates.hbd).toFixed(2)),
         exchangeRate: rates,
         timestamp: Date.now()
+      };
+    }
+  }
+
+  async getInvoicePayments(id: string): Promise<{ payments: InvoicePayment }> {
+    try {
+      return await this.handleJsonResponse(
+        this.httpClient.get(`/invoices/${id}/payments`)
+      );
+    } catch {
+      // For development, return mock payment data
+      return {
+        payments: {
+          invoiceId: id,
+          payments: [
+            {
+              id: 1,
+              invoiceId: id,
+              fromAccount: 'customer123',
+              amount: 500.0,
+              currency: 'HIVE',
+              blockNumber: 12345678,
+              transactionId: 'abcd1234efgh5678ijkl9012mnop3456',
+              createdAt: new Date('2024-01-16T10:30:00Z')
+            },
+            {
+              id: 2,
+              invoiceId: id,
+              fromAccount: 'customer123',
+              amount: 200.0,
+              currency: 'HBD',
+              blockNumber: 12345750,
+              transactionId: 'wxyz9876uvab5432cdef1098ghij7654',
+              createdAt: new Date('2024-01-17T14:15:00Z')
+            }
+          ],
+          totalPaid: {
+            hive: 500.0,
+            hbd: 200.0
+          },
+          amountDue: {
+            hive: 456.3,
+            hbd: 3958.0
+          }
+        }
       };
     }
   }

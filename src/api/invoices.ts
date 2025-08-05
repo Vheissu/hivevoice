@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import type { Invoice, SupportedCurrency, HiveConversion } from '../types/index.js'
+import type { Invoice, HiveConversion } from '../types/index.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { db } from '../database/schema.js'
 import { hiveService } from '../services/hive.js'
@@ -278,6 +278,24 @@ invoices.post('/', zValidator('json', createInvoiceSchema), async (c) => {
   } catch (error) {
     console.error('Error creating invoice:', error)
     return c.json({ error: 'Failed to create invoice' }, 500)
+  }
+})
+
+// Get payment information for an invoice
+invoices.get('/:id/payments', async (c) => {
+  const id = c.req.param('id')
+  
+  try {
+    const payments = await hiveService.instance.getInvoicePayments(id)
+    
+    if (!payments) {
+      return c.json({ error: 'Invoice not found' }, 404)
+    }
+    
+    return c.json({ payments })
+  } catch (error) {
+    console.error('Error fetching invoice payments:', error)
+    return c.json({ error: 'Failed to fetch payments' }, 500)
   }
 })
 

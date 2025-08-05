@@ -2,11 +2,13 @@ import { IApiService } from '../services/api';
 import { IPaymentService, PaymentRequest, PaymentResponse } from '../services/payment';
 import { resolve } from 'aurelia';
 import { IRouteViewModel } from '@aurelia/router';
-import type { Invoice, SupportedCurrency } from '../types/index';
+import type { Invoice, SupportedCurrency, InvoicePayment } from '../types/index';
 
 export class InvoiceDetail implements IRouteViewModel {
   public invoice: Invoice | null = null;
+  public invoicePayments: InvoicePayment | null = null;
   public isLoading = true;
+  public isLoadingPayments = false;
   public error = '';
   public paymentError = '';
   public paymentSuccess = '';
@@ -39,11 +41,28 @@ export class InvoiceDetail implements IRouteViewModel {
     try {
       const response = await this.apiService.getInvoice(id);
       this.invoice = response.invoice;
+      
+      // Load payment information if invoice is loaded successfully
+      await this.loadPayments(id);
     } catch (error) {
       this.error = error instanceof Error ? error.message : 'Failed to load invoice';
     }
     
     this.isLoading = false;
+  }
+
+  private async loadPayments(id: string) {
+    this.isLoadingPayments = true;
+    
+    try {
+      const response = await this.apiService.getInvoicePayments(id);
+      this.invoicePayments = response.payments;
+    } catch (error) {
+      console.error('Failed to load payments:', error);
+      // Don't show error for payments as it's not critical
+    }
+    
+    this.isLoadingPayments = false;
   }
 
   getStatusClass(status: string) {
@@ -135,6 +154,7 @@ export class InvoiceDetail implements IRouteViewModel {
       if (response.success) {
         this.paymentSuccess = response.message;
         this.closePaymentModal();
+        // Reload invoice and payments to show updated status
         await this.loadInvoice(this.currentInvoiceId);
       } else {
         this.paymentError = response.message;
