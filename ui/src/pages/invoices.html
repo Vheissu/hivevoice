@@ -1,0 +1,144 @@
+<div class="px-4 sm:px-6 lg:px-8">
+  <div class="sm:flex sm:items-center">
+    <div class="sm:flex-auto">
+      <h1 class="text-2xl font-semibold leading-6 text-gray-900">Invoices</h1>
+      <p class="mt-2 text-sm text-gray-700">Manage all your invoices</p>
+    </div>
+    <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
+      <a load="../invoices/create" class="block rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-semibold text-white shadow-sm hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+        Create Invoice
+      </a>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="mt-6 bg-white shadow rounded-lg p-4">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div>
+        <label for="search" class="block text-sm font-medium text-gray-700">Search</label>
+        <input
+          type="text"
+          id="search"
+          value.bind="searchTerm"
+          placeholder="Search by client name, invoice number, or Hive address..."
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+        />
+      </div>
+      <div>
+        <label for="status" class="block text-sm font-medium text-gray-700">Status</label>
+        <select
+          id="status"
+          value.bind="statusFilter"
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+        >
+          <option value="all">All Statuses</option>
+          <option value="pending">Pending</option>
+          <option value="partial">Partial</option>
+          <option value="paid">Paid</option>
+        </select>
+      </div>
+      <div>
+        <label for="currency" class="block text-sm font-medium text-gray-700">Currency</label>
+        <select
+          id="currency"
+          value.bind="currencyFilter"
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+        >
+          <option value="all">All Currencies</option>
+          <option repeat.for="currency of availableCurrencies" value.bind="currency">
+            ${getCurrencySymbol(currency)} ${currency}
+          </option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div if.bind="isLoading" class="mt-8 flex justify-center">
+    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+  </div>
+
+  <div if.bind="error" class="mt-8 bg-red-50 border border-red-200 rounded-md p-4">
+    <div class="text-red-800 text-sm">${error}</div>
+  </div>
+
+  <div if.bind="!isLoading && filteredInvoices.length === 0" class="mt-8 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+    <h3 class="mt-2 text-sm font-medium text-gray-900">No invoices found</h3>
+    <p class="mt-1 text-sm text-gray-500">Get started by creating your first invoice.</p>
+    <div class="mt-6">
+      <a load="../invoices/create" class="inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+        Create Invoice
+      </a>
+    </div>
+  </div>
+
+  <!-- Invoice Table -->
+  <div if.bind="!isLoading && filteredInvoices.length > 0" class="mt-8 flow-root">
+    <div class="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
+      <div class="inline-block min-w-full py-2 align-middle sm:px-6 lg:px-8">
+        <div class="overflow-hidden shadow ring-1 ring-black ring-opacity-5 md:rounded-lg">
+          <table class="min-w-full divide-y divide-gray-300">
+            <thead class="bg-gray-50">
+              <tr>
+                <th scope="col" class="py-3.5 pl-4 pr-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 sm:pl-6">
+                  Invoice
+                </th>
+                <th scope="col" class="px-3 py-3.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Client
+                </th>
+                <th scope="col" class="px-3 py-3.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Amount
+                </th>
+                <th scope="col" class="px-3 py-3.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Status
+                </th>
+                <th scope="col" class="px-3 py-3.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Due Date
+                </th>
+                <th scope="col" class="relative py-3.5 pl-3 pr-4 sm:pr-6">
+                  <span class="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 bg-white">
+              <tr repeat.for="invoice of filteredInvoices" class="hover:bg-gray-50">
+                <td class="whitespace-nowrap py-4 pl-4 pr-3 text-sm sm:pl-6">
+                  <div class="font-medium text-gray-900">${invoice.invoiceNumber}</div>
+                  <div class="text-gray-500">${formatDate(invoice.createdAt)}</div>
+                </td>
+                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
+                  <div class="font-medium">${invoice.clientName}</div>
+                  <div class="text-gray-500">@${invoice.clientHiveAddress}</div>
+                </td>
+                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
+                  <div class="font-medium">${getCurrencySymbol(invoice.currency)}${invoice.total.toFixed(2)} ${invoice.currency}</div>
+                  <div if.bind="invoice.hiveConversion" class="text-xs text-gray-500">
+                    ${invoice.hiveConversion.hbdAmount.toFixed(2)} HBD
+                  </div>
+                </td>
+                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
+                  <span class="inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${getStatusClass(invoice.status)}">
+                    ${invoice.status}
+                  </span>
+                </td>
+                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-900">
+                  ${formatDate(invoice.dueDate)}
+                </td>
+                <td class="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
+                  <a load="../invoices/${invoice.id}" class="text-blue-600 hover:text-blue-900 mr-4">
+                    View
+                  </a>
+                  <button click.trigger="deleteInvoice(invoice)" class="text-red-600 hover:text-red-900">
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -2,16 +2,20 @@ export interface Invoice {
   id: string
   invoiceNumber: string
   clientName: string
-  clientEmail: string
+  clientHiveAddress: string
   items: InvoiceItem[]
   subtotal: number
   tax: number
   total: number
+  currency: SupportedCurrency
+  hiveConversion?: HiveConversion
   status: InvoiceStatus
   createdAt: Date
   updatedAt: Date
   dueDate: Date
   hiveTransactionId?: string
+  encryptedData?: string
+  shareableLink?: string
 }
 
 export interface InvoiceItem {
@@ -27,6 +31,7 @@ export type InvoiceStatus = 'pending' | 'partial' | 'paid'
 export interface HiveConfig {
   username: string
   postingKey: string
+  activeKey?: string
   nodes: string[]
 }
 
@@ -58,4 +63,25 @@ export interface AuthResponse {
 export interface AuthStatusResponse {
   authenticated: boolean
   user?: AuthUser
+}
+
+export interface DashboardStats {
+  totalInvoices: number
+  totalRevenue: number
+  pendingInvoices: number
+  paidInvoices: number
+  pendingRevenue: number
+  recentInvoices: Invoice[]
+}
+
+export type SupportedCurrency = 'USD' | 'GBP' | 'EUR' | 'AUD' | 'NZD'
+
+export interface HiveConversion {
+  hiveAmount: number
+  hbdAmount: number
+  exchangeRate: {
+    hive: number
+    hbd: number
+  }
+  timestamp: number
 }

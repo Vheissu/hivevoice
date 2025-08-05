@@ -7,6 +7,12 @@ export default defineConfig({
   server: {
     open: !process.env.CI,
     port: 9000,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
   },
   esbuild: {
     target: 'es2022'

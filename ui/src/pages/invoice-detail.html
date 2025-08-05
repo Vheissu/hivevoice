@@ -1,0 +1,190 @@
+<div class="px-4 sm:px-6 lg:px-8">
+  <div if.bind="isLoading" class="flex justify-center py-12">
+    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+  </div>
+
+  <div if.bind="error" class="bg-red-50 border border-red-200 rounded-md p-4">
+    <div class="text-red-800 text-sm">${error}</div>
+  </div>
+
+  <div if.bind="invoice && !isLoading" class="max-w-4xl mx-auto">
+    <!-- Header -->
+    <div class="sm:flex sm:items-center sm:justify-between mb-8">
+      <div>
+        <h1 class="text-2xl font-semibold leading-6 text-gray-900">Invoice ${invoice.invoiceNumber}</h1>
+        <p class="mt-2 text-sm text-gray-700">Invoice details and line items</p>
+      </div>
+      <div class="mt-4 sm:mt-0 flex space-x-3">
+        <button
+          click.trigger="print()"
+          class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+        >
+          <svg class="-ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+          </svg>
+          Print
+        </button>
+        <a
+          load="/invoices"
+          class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+        >
+          Back to Invoices
+        </a>
+      </div>
+    </div>
+
+    <!-- Invoice Content -->
+    <div class="bg-white shadow-lg rounded-lg overflow-hidden">
+      <!-- Invoice Header -->
+      <div class="px-6 py-8 border-b border-gray-200">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <!-- Company Info -->
+          <div>
+            <h2 class="text-2xl font-bold text-gray-900 mb-2">HiveVoice</h2>
+            <p class="text-gray-600">Professional Invoicing</p>
+          </div>
+          
+          <!-- Invoice Info -->
+          <div class="text-right">
+            <div class="inline-flex rounded-full px-3 py-1 text-sm font-semibold ${getStatusClass(invoice.status)} mb-4">
+              ${invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
+            </div>
+            <div class="space-y-1">
+              <p class="text-sm text-gray-600">Invoice Number: <span class="font-medium text-gray-900">${invoice.invoiceNumber}</span></p>
+              <p class="text-sm text-gray-600">Currency: <span class="font-medium text-gray-900">${getCurrencySymbol(invoice.currency)} ${invoice.currency}</span></p>
+              <p class="text-sm text-gray-600">Created: <span class="font-medium text-gray-900">${formatDate(invoice.createdAt)}</span></p>
+              <p class="text-sm text-gray-600">Due Date: <span class="font-medium text-gray-900">${formatDate(invoice.dueDate)}</span></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Client Info -->
+      <div class="px-6 py-6 border-b border-gray-200">
+        <h3 class="text-lg font-medium text-gray-900 mb-3">Bill To:</h3>
+        <div class="text-gray-600 space-y-1">
+          <p class="font-medium text-gray-900">${invoice.clientName}</p>
+          <p>@${invoice.clientHiveAddress}</p>
+        </div>
+      </div>
+
+      <!-- Invoice Items -->
+      <div class="px-6 py-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Invoice Items</h3>
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              <tr repeat.for="item of invoice.items">
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.description}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.quantity}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${getCurrencySymbol(invoice.currency)}${item.unitPrice.toFixed(2)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${getCurrencySymbol(invoice.currency)}${item.total.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Totals -->
+      <div class="px-6 py-6 bg-gray-50 border-t border-gray-200">
+        <div class="flex justify-end">
+          <div class="w-full max-w-lg space-y-3">
+            <!-- Original Currency Totals -->
+            <div class="space-y-2">
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Subtotal (${invoice.currency}):</span>
+                <span class="font-medium text-gray-900">${getCurrencySymbol(invoice.currency)}${invoice.subtotal.toFixed(2)}</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Tax (${invoice.currency}):</span>
+                <span class="font-medium text-gray-900">${getCurrencySymbol(invoice.currency)}${invoice.tax.toFixed(2)}</span>
+              </div>
+              <div class="flex justify-between text-lg font-semibold border-t pt-3">
+                <span class="text-gray-900">Total (${invoice.currency}):</span>
+                <span class="text-gray-900">${getCurrencySymbol(invoice.currency)}${invoice.total.toFixed(2)}</span>
+              </div>
+            </div>
+            
+            <!-- HIVE/HBD Conversion -->
+            <div if.bind="invoice.hiveConversion" class="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
+              <h4 class="text-sm font-medium text-green-900 mb-2">HIVE/HBD Equivalent</h4>
+              <div class="space-y-1 text-sm text-green-800">
+                <div class="flex justify-between">
+                  <span>HIVE Amount:</span>
+                  <span class="font-medium">${invoice.hiveConversion.hiveAmount.toFixed(3)} HIVE</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>HBD Amount:</span>
+                  <span class="font-medium">${invoice.hiveConversion.hbdAmount.toFixed(2)} HBD</span>
+                </div>
+                <div class="text-xs text-green-600 mt-2">
+                  Conversion rate: ${invoice.hiveConversion.exchangeRate.hive.toFixed(3)} HIVE, ${invoice.hiveConversion.exchangeRate.hbd.toFixed(2)} HBD per ${invoice.currency}
+                </div>
+                <div class="text-xs text-green-600">
+                  Calculated: ${formatConversionDate(invoice.hiveConversion.timestamp)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Notes -->
+      <div if.bind="invoice.notes" class="px-6 py-6 border-t border-gray-200">
+        <h3 class="text-lg font-medium text-gray-900 mb-3">Notes</h3>
+        <div class="text-gray-600 whitespace-pre-line">${invoice.notes}</div>
+      </div>
+
+      <!-- Payment Info -->
+      <div class="px-6 py-6 bg-blue-50 border-t border-gray-200">
+        <h3 class="text-lg font-medium text-gray-900 mb-3">Payment Information</h3>
+        <div class="text-sm text-gray-600 space-y-2">
+          <p>This invoice is stored on the Hive blockchain for transparency and immutability.</p>
+          <p if.bind="invoice.hiveTransactionId">Transaction ID: <span class="font-mono text-xs">${invoice.hiveTransactionId}</span></p>
+          <div class="bg-white p-3 rounded border border-blue-200">
+            <p class="font-medium text-gray-700 mb-1">Payment Options:</p>
+            <ul class="space-y-1 text-xs">
+              <li>• Original currency (${getCurrencySymbol(invoice.currency)}${invoice.total.toFixed(2)} ${invoice.currency})</li>
+              <li if.bind="invoice.hiveConversion">• HIVE: ${invoice.hiveConversion.hiveAmount.toFixed(3)} HIVE</li>
+              <li if.bind="invoice.hiveConversion">• HBD: ${invoice.hiveConversion.hbdAmount.toFixed(2)} HBD (Hive Backed Dollars)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  @media print {
+    .px-4, .sm\\:px-6, .lg\\:px-8 {
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+    
+    button, a {
+      display: none !important;
+    }
+    
+    .shadow-lg {
+      box-shadow: none !important;
+    }
+    
+    .bg-gray-50 {
+      background-color: #f9fafb !important;
+      -webkit-print-color-adjust: exact;
+    }
+    
+    .border-gray-200 {
+      border-color: #e5e7eb !important;
+    }
+  }
+</style>

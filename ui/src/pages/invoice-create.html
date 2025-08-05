@@ -1,0 +1,308 @@
+<div class="px-4 sm:px-6 lg:px-8">
+  <div class="sm:flex sm:items-center">
+    <div class="sm:flex-auto">
+      <h1 class="text-2xl font-semibold leading-6 text-gray-900">Create Invoice</h1>
+      <p class="mt-2 text-sm text-gray-700">Create a new invoice for your client</p>
+    </div>
+  </div>
+
+  <div if.bind="error" class="mt-6 bg-red-50 border border-red-200 rounded-md p-4">
+    <div class="text-red-800 text-sm">${error}</div>
+  </div>
+
+  <form class="mt-6 space-y-8">
+    <!-- Invoice Details -->
+    <div class="bg-white shadow rounded-lg">
+      <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Invoice Information</h3>
+        <div class="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-2">
+          <div>
+            <label for="dueDate" class="block text-sm font-medium text-gray-700">Due Date</label>
+            <input
+              type="date"
+              id="dueDate"
+              value.bind="invoice.dueDate"
+              class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            />
+          </div>
+          <div>
+            <label for="currency" class="block text-sm font-medium text-gray-700">Currency</label>
+            <select
+              id="currency"
+              value.bind="invoice.currency"
+              change.trigger="onCurrencyChange()"
+              disabled.bind="isLoadingCurrencies"
+              class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            >
+              <div if.bind="isLoadingCurrencies" class="px-3 py-2 text-gray-500">Loading currencies...</div>
+              <option repeat.for="currency of availableCurrencies" value.bind="currency.currency">
+                ${currency.symbol} ${currency.currency} - ${currency.name}
+              </option>
+            </select>
+            <p if.bind="selectedCurrency" class="mt-1 text-xs text-gray-500">
+              Current rates: ${selectedCurrency.hiveRate.toFixed(3)} HIVE, ${selectedCurrency.hbdRate.toFixed(2)} HBD per ${selectedCurrency.currency}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Client Information -->
+    <div class="bg-white shadow rounded-lg">
+      <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Client Information</h3>
+        <div class="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-2">
+          <div>
+            <label for="clientName" class="block text-sm font-medium text-gray-700">Client Name</label>
+            <input
+              type="text"
+              id="clientName"
+              value.bind="invoice.clientName"
+              class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+              placeholder="Enter client name"
+            />
+          </div>
+          <div>
+            <label for="clientHiveAddress" class="block text-sm font-medium text-gray-700">Hive Address</label>
+            <input
+              type="text"
+              id="clientHiveAddress"
+              value.bind="invoice.clientHiveAddress"
+              class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+              placeholder="@beggars"
+            />
+            <p class="mt-1 text-sm text-gray-500">The client's Hive blockchain address (e.g., @beggars)</p>
+          </div>
+        </div>
+        
+        <!-- Notification Options -->
+        <div class="mt-6">
+          <div class="flex items-center">
+            <input
+              type="checkbox"
+              id="notifyClient"
+              checked.bind="invoice.notifyClient"
+              class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+            />
+            <label for="notifyClient" class="ml-2 block text-sm text-gray-900">
+              Send Hive blockchain notification to client
+            </label>
+            <div class="ml-6 mt-1 text-xs text-green-600">
+              ✅ Server-side HIVE transfer with memo (0.001 HIVE)
+            </div>
+          </div>
+          <p class="mt-2 text-sm text-gray-500">
+            When enabled, a small HIVE transfer (0.001 HIVE) with invoice details in the memo will be sent to the client's wallet, making it visible in their transaction history.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Invoice Items -->
+    <div class="bg-white shadow rounded-lg">
+      <div class="px-4 py-5 sm:p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg leading-6 font-medium text-gray-900">Invoice Items</h3>
+          <button
+            type="button"
+            click.trigger="addItem()"
+            class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          >
+            <svg class="-ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Add Item
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-300">
+            <thead>
+              <tr>
+                <th class="px-3 py-3.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Description</th>
+                <th class="px-3 py-3.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Qty</th>
+                <th class="px-3 py-3.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Rate</th>
+                <th class="px-3 py-3.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Amount</th>
+                <th class="px-3 py-3.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+              <tr repeat.for="item of invoice.items">
+                <td class="px-3 py-4">
+                  <input
+                    type="text"
+                    value.bind="item.description"
+                    change.trigger="onItemChange(item)"
+                    class="block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    placeholder="Description of work"
+                  />
+                </td>
+                <td class="px-3 py-4">
+                  <input
+                    type="number"
+                    value.bind="item.quantity"
+                    change.trigger="onItemChange(item)"
+                    min="1"
+                    class="block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  />
+                </td>
+                <td class="px-3 py-4">
+                  <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <span class="text-gray-500 sm:text-sm">${selectedCurrency?.symbol || '$'}</span>
+                    </div>
+                    <input
+                      type="number"
+                      value.bind="item.unitPrice"
+                      change.trigger="onItemChange(item)"
+                      min="0"
+                      step="0.01"
+                      class="block w-full pl-7 border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    />
+                  </div>
+                </td>
+                <td class="px-3 py-4">
+                  <div class="text-sm text-gray-900 font-medium">${selectedCurrency?.symbol || '$'}${(item.quantity * item.unitPrice).toFixed(2)}</div>
+                </td>
+                <td class="px-3 py-4">
+                  <button
+                    type="button"
+                    click.trigger="removeItem($index)"
+                    class="text-red-600 hover:text-red-900 text-sm font-medium"
+                    disabled.bind="invoice.items.length === 1"
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Totals -->
+    <div class="bg-white shadow rounded-lg">
+      <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Totals</h3>
+        <div class="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-2">
+          <div>
+            <label for="taxRate" class="block text-sm font-medium text-gray-700">Tax Rate (%)</label>
+            <input
+              type="number"
+              id="taxRate"
+              value.bind="taxRate"
+              change.trigger="onTaxRateChange()"
+              min="0"
+              max="100"
+              step="0.1"
+              class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            />
+          </div>
+          <div class="space-y-3">
+            <div class="flex justify-between">
+              <span class="text-sm font-medium text-gray-700">Subtotal:</span>
+              <span class="text-sm text-gray-900">${selectedCurrency?.symbol || '$'}${subtotal.toFixed(2)}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-sm font-medium text-gray-700">Tax (${taxRate}%):</span>
+              <span class="text-sm text-gray-900">${selectedCurrency?.symbol || '$'}${invoice.tax.toFixed(2)}</span>
+            </div>
+            <div class="flex justify-between border-t pt-3">
+              <span class="text-lg font-semibold text-gray-900">Total:</span>
+              <span class="text-lg font-semibold text-gray-900">${selectedCurrency?.symbol || '$'}${total.toFixed(2)}</span>
+            </div>
+            
+            <!-- Conversion Display -->
+            <div if.bind="conversionInfo" class="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <h4 class="text-sm font-medium text-blue-900 mb-2">HIVE/HBD Conversion</h4>
+              <div class="space-y-1 text-sm text-blue-800">
+                <div class="flex justify-between">
+                  <span>HIVE Amount:</span>
+                  <span class="font-medium">${conversionInfo.hiveAmount.toFixed(3)} HIVE</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>HBD Amount:</span>
+                  <span class="font-medium">${conversionInfo.hbdAmount.toFixed(2)} HBD</span>
+                </div>
+                <div class="text-xs text-blue-600 mt-2">
+                  Exchange rates: ${conversionInfo.exchangeRate.hive.toFixed(3)} HIVE, ${conversionInfo.exchangeRate.hbd.toFixed(2)} HBD per ${invoice.currency}
+                </div>
+              </div>
+              <div if.bind="isConverting" class="flex items-center mt-2">
+                <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                <span class="text-xs text-blue-600">Updating conversion...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Share Options -->
+    <div class="bg-white shadow rounded-lg">
+      <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Share Options</h3>
+        <div class="space-y-3">
+          <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p class="text-sm font-medium text-gray-900">Shareable Link</p>
+              <p class="text-sm text-gray-500">Generate a secure link that can be shared via email or other channels</p>
+            </div>
+            <button
+              type="button"
+              click.trigger="generateShareableLink()"
+              disabled.bind="isGeneratingLink"
+              class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span if.bind="isGeneratingLink" class="animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-gray-500 border-r-transparent rounded-full"></span>
+              ${isGeneratingLink ? 'Generating...' : 'Generate Link'}
+            </button>
+          </div>
+          
+          <!-- Generated Link Display -->
+          <div if.bind="shareableLink" class="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
+            <p class="text-sm font-medium text-green-900 mb-2">Generated Link:</p>
+            <div class="flex items-center space-x-2">
+              <input
+                type="text"
+                readonly
+                value.bind="shareableLink"
+                class="flex-1 px-3 py-2 text-sm bg-white border border-green-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <button
+                type="button"
+                click.trigger="copyToClipboard()"
+                class="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                Copy
+              </button>
+            </div>
+            <p class="text-xs text-green-600 mt-2">This link allows anyone to view the invoice without authentication.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="flex justify-end space-x-3">
+      <button
+        type="button"
+        click.trigger="cancel()"
+        class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        click.trigger="save()"
+        disabled.bind="isLoading"
+        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <div if.bind="isLoading" class="animate-spin -ml-1 mr-3 h-4 w-4 border-2 border-white border-r-transparent rounded-full"></div>
+        ${isLoading ? 'Creating...' : 'Create Invoice'}
+      </button>
+    </div>
+  </form>
+</div>
