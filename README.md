@@ -4,11 +4,13 @@ A modern, self-hosted invoicing system that leverages the Hive blockchain for tr
 
 ## ✨ Key Features
 
-### 🔗 **Blockchain-Powered Invoicing**
+### 🔗 **Blockchain-First Invoicing**
 - **Zero Fees**: Leverage Hive's fee-less blockchain for all operations
 - **3-Second Settlement**: Near-instant payment detection with Hive's fast block times
-- **Transparent & Immutable**: All invoices stored as custom_json operations on-chain
+- **Primary Storage**: All invoice data encrypted and stored directly on Hive blockchain
+- **Bi-directional Encryption**: Both sender and recipient can decrypt invoice data using their memo keys
 - **Multi-Currency Support**: Invoice in USD, GBP, EUR, AUD, NZD with automatic HIVE/HBD conversion
+- **Unlimited Capacity**: 64KB storage capacity for comprehensive invoices with detailed descriptions
 
 ### 💰 **Automatic Payment Processing**
 - **Real-Time Monitoring**: Automatically scans Hive blockchain for incoming payments
@@ -24,31 +26,35 @@ A modern, self-hosted invoicing system that leverages the Hive blockchain for tr
 
 ### 🛡️ **Self-Hosted & Secure**
 - **Complete Control**: Host on your VPS, Raspberry Pi, or laptop
-- **Encrypted Invoices**: Optional end-to-end memo encryption for privacy
-- **No SaaS Lock-in**: Your data stays with you
-- **SQLite Database**: Lightweight, no additional database server required
+- **End-to-End Encryption**: All invoice data encrypted by default using Hive memo encryption
+- **No SaaS Lock-in**: Your data lives on the immutable Hive blockchain
+- **SQLite Cache**: Lightweight local database for indexing and fast queries
 - **Secure Keys**: Uses posting, active, and memo keys (owner key never needed)
+- **Privacy First**: Only you and your client can decrypt invoice details
 
 ## 🏗️ Architecture
 
 ```
-📦 HiveVoice
+📦 HiveVoice (Blockchain-First Architecture)
 ├─ 🖥️  Backend (Node.js + TypeScript)
 │   ├─ Hono API Server
 │   ├─ Payment Monitor Service
 │   ├─ Hive Blockchain Integration
-│   └─ SQLite Database
+│   ├─ Memo Encryption/Decryption
+│   └─ SQLite Cache (indexing only)
 │
 ├─ 🌐 Frontend (Aurelia 2 + TypeScript)
 │   ├─ Invoice Management UI
+│   ├─ Rich Invoice Creation
 │   ├─ Payment Processing
 │   ├─ Dashboard & Analytics
 │   └─ HiveKeychain/HiveSigner Integration
 │
-└─ ⛓️  Hive Blockchain
-    ├─ Invoice Storage (custom_json)
+└─ ⛓️  Hive Blockchain (PRIMARY STORAGE)
+    ├─ Encrypted Invoice Posts (64KB capacity)
     ├─ Payment Processing (transfers)
-    └─ Transaction History
+    ├─ Transaction History
+    └─ Immutable Data Layer
 ```
 
 ## 🚀 Quick Start
@@ -96,7 +102,7 @@ FRONTEND_URL=http://localhost:5173
 HIVE_USERNAME=your-hive-username
 HIVE_POSTING_KEY=5JYourPostingKeyHere...
 HIVE_ACTIVE_KEY=5JYourActiveKeyHere...
-HIVE_MEMO_KEY=5JYourMemoKeyHere... # Optional, for encrypted invoices
+HIVE_MEMO_KEY=5JYourMemoKeyHere... # Required for encrypted invoice storage
 HIVE_NODES=https://api.hive.blog,https://api.openhive.network
 
 # Database Configuration
@@ -146,8 +152,8 @@ npm start
 1. **Login** with your admin credentials
 2. **Navigate** to "Create Invoice"
 3. **Fill in** client details and invoice items
-4. **Select** currency and add any notes
-5. **Create** - invoice is automatically stored on Hive blockchain
+4. **Select** currency and add detailed notes and descriptions
+5. **Create** - invoice is encrypted and stored as a post on Hive blockchain
 
 ### Payment Process
 
@@ -167,6 +173,23 @@ Payments are automatically detected when clients send transfers with memos like:
 
 The system monitors the Hive blockchain every 10 seconds and updates invoice status in real-time.
 
+### Rich Invoice Features
+
+HiveVoice uses Hive posts to store encrypted invoice data with **64KB capacity**, enabling comprehensive invoicing:
+
+**Enhanced Capabilities:**
+- **Detailed line items** with full descriptions and specifications
+- **Comprehensive notes** and terms & conditions
+- **Rich formatting** for professional invoice presentation
+- **Multiple pages** of invoice content when needed
+- **Future expansion** for attachments and multimedia content
+
+**No Size Constraints:**
+- Create invoices with extensive product catalogs
+- Include detailed service descriptions and specifications
+- Add comprehensive terms, conditions, and payment instructions
+- Store complete project documentation within invoices
+
 ## 🔧 Configuration
 
 ### Environment Variables
@@ -178,7 +201,7 @@ The system monitors the Hive blockchain every 10 seconds and updates invoice sta
 | `HIVE_USERNAME` | Yes | Your Hive account username |
 | `HIVE_POSTING_KEY` | Yes | Posting key for blockchain operations |
 | `HIVE_ACTIVE_KEY` | Yes | Active key for transfers and notifications |
-| `HIVE_MEMO_KEY` | No | Private memo key for invoice encryption (optional) |
+| `HIVE_MEMO_KEY` | Yes | Private memo key for invoice encryption (required for blockchain storage) |
 | `HIVE_NODES` | No | Comma-separated list of Hive API nodes |
 | `DATABASE_PATH` | No | SQLite database file path |
 | `ADMIN_USERNAME` | Yes | Web interface admin username |
@@ -211,11 +234,13 @@ get_private_key_from_password your_account_name memo YOUR_MASTER_PASSWORD
 ```
 
 
-### Backward Compatibility & Migration
+### Blockchain-First Storage
 
-- **Legacy Invoices**: Invoices created before the memo-key feature was introduced will continue to function without encryption.
-- **Optional Encryption**: The `HIVE_MEMO_KEY` is only required if you want to use the encrypted invoice feature.
-- **Migrating Old Invoices**: To encrypt an old, unencrypted invoice, simply open it in the UI, make a small edit (like adding a note), and re-save it. This will automatically encrypt and update the invoice on the blockchain.
+- **Primary Storage**: All invoices are now stored encrypted on the Hive blockchain by default
+- **Required Encryption**: The `HIVE_MEMO_KEY` is required for all invoice operations
+- **SQLite as Cache**: Local database serves as an index and cache for fast queries
+- **Automatic Recovery**: If local cache is lost, invoices can be recovered from the blockchain
+- **Bi-directional Access**: Both you and your clients can decrypt invoice data using your respective memo keys
 
 For better reliability, configure multiple Hive API nodes:
 

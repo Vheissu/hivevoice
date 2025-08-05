@@ -28,6 +28,7 @@ export class InvoiceCreate {
   public availableCurrencies: CurrencyRate[] = [];
   public isLoadingCurrencies = false;
   public conversionInfo: ConvertAmountResponse | null = null;
+  
 
   // Expose hiveAuth to template
   get hiveAuth() {
@@ -151,6 +152,7 @@ export class InvoiceCreate {
     this.taxRate = Number(this.taxRate) || 0;
     this.calculateTotals();
   }
+
 
   async save() {
     this.isLoading = true;

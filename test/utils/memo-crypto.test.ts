@@ -162,17 +162,18 @@ describe('memo-crypto', () => {
       }).toThrow(MissingKeyError);
     });
 
-    it('should throw MissingKeyError when fromPubMemo is missing', () => {
+    it('should not throw when fromPubMemo is missing (optional parameter)', () => {
       const testData = { message: 'test' };
       const encrypted = encryptJSON(testData, testPrivateKey1, testPublicKey2);
       
+      // fromPubMemo is now optional, so these should NOT throw
       expect(() => {
         decryptJSON(encrypted, testPrivateKey2, '');
-      }).toThrow(MissingKeyError);
+      }).not.toThrow();
       
       expect(() => {
-        decryptJSON(encrypted, testPrivateKey2, '   ');
-      }).toThrow(MissingKeyError);
+        decryptJSON(encrypted, testPrivateKey2);
+      }).not.toThrow();
     });
 
     it('should throw InvalidKeyError when toPrivMemo is invalid format', () => {

@@ -18,7 +18,8 @@ export class Database {
     // Check if we need to migrate existing schema first
     await this.migrateSchema()
 
-    // Create the table with the correct current schema
+    // Create tables for LOCAL CACHE and INDEX (Hive blockchain is primary storage)
+    // SQLite stores minimal data for querying/indexing while full encrypted invoice data lives on-chain
     await this.run(`
       CREATE TABLE IF NOT EXISTS invoices (
         id TEXT PRIMARY KEY,
@@ -34,9 +35,10 @@ export class Database {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         due_date DATETIME NOT NULL,
-        hive_transaction_id TEXT,
-        encrypted_data TEXT,
-        shareable_link TEXT
+        hive_transaction_id TEXT, -- Blockchain transaction ID (primary reference)
+        hive_permlink TEXT,       -- Post permlink for blockchain post retrieval
+        encrypted_data TEXT,      -- Cached encrypted payload from blockchain post
+        shareable_link TEXT       -- Optional public link for invoice access
       )
     `)
 
@@ -94,6 +96,7 @@ export class Database {
       const hasHiveAddress = tableInfo.some(column => column.name === 'client_hive_address')
       const hasEncryptedData = tableInfo.some(column => column.name === 'encrypted_data')
       const hasShareableLink = tableInfo.some(column => column.name === 'shareable_link')
+      const hasHivePermlink = tableInfo.some(column => column.name === 'hive_permlink')
       const hasCurrency = tableInfo.some(column => column.name === 'currency')
       const hasHiveConversionData = tableInfo.some(column => column.name === 'hive_conversion_data')
 
@@ -116,6 +119,7 @@ export class Database {
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           due_date DATETIME NOT NULL,
           hive_transaction_id TEXT,
+          hive_permlink TEXT,
           encrypted_data TEXT,
           shareable_link TEXT
         )`)
@@ -166,6 +170,11 @@ export class Database {
         if (!hasHiveConversionData) {
           console.log('Migrating database: Adding hive_conversion_data column')
           await this.run(`ALTER TABLE invoices ADD COLUMN hive_conversion_data TEXT`)
+        }
+
+        if (!hasHivePermlink) {
+          console.log('Migrating database: Adding hive_permlink column')
+          await this.run(`ALTER TABLE invoices ADD COLUMN hive_permlink TEXT`)
         }
       }
 

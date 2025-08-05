@@ -243,12 +243,12 @@ export class HiveService {
   }
 
   /**
-   * Stores encrypted invoice data on the Hive blockchain
+   * Stores encrypted invoice data as a post on the Hive blockchain
    * @param invoice - The invoice object to encrypt and store
    * @param recipient - The Hive username of the recipient
-   * @returns Transaction ID of the broadcast operation
+   * @returns Transaction ID of the broadcast operation and post permlink
    */
-async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId: string; encryptedPayload: string }> {
+async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId: string; encryptedPayload: string; permlink: string }> {
     try {
       // Validate that we have a memo key for encryption
       this.validateEncryptionRequirements(true)
@@ -265,7 +265,7 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
         throw new Error('Recipient username is required')
       }
 
-      console.log('Storing encrypted invoice data:', {
+      console.log('Storing encrypted invoice as post:', {
         invoiceId: invoice.id,
         recipient: recipient.replace('@', ''),
         invoiceNumber: invoice.invoiceNumber
@@ -288,22 +288,39 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
         throw new MemoCryptoError(`Encryption failed: ${error instanceof Error ? error.message : String(error)}`)
       }
 
-      // 3. Create the custom JSON operation
-      const customJsonOp: Operation = [
-        'custom_json',
+      // 3. Generate unique permlink for the invoice post
+      const permlink = `hivevoice-${invoice.invoiceNumber.toLowerCase()}-${Date.now()}`
+      
+      // 4. Create post operation with encrypted content
+      const postOp: Operation = [
+        'comment',
         {
-          required_auths: [],
-          required_posting_auths: [this.config.username],
-          id: 'hivevoice_invoice_data',
-          json: JSON.stringify({
-            action: 'invoice_data',
-            invoice_id: invoice.id,
-            payload: encryptedPayload
+          parent_author: '',
+          parent_permlink: 'hivevoice-invoices', // Category
+          author: this.config.username,
+          permlink: permlink,
+          title: `Invoice ${invoice.invoiceNumber}`, // Privacy-safe title
+          body: `#ENCRYPTED_INVOICE\n${encryptedPayload}`,
+          json_metadata: JSON.stringify({
+            tags: ['hivevoice-invoices', 'business', invoice.status, new Date().getFullYear().toString()],
+            app: 'hivevoice/2.0',
+            version: '2.0.0',
+            invoice: {
+              id: invoice.id,
+              number: invoice.invoiceNumber,
+              status: invoice.status,
+              created: invoice.createdAt.toISOString(),
+              due: invoice.dueDate.toISOString(),
+              encrypted: true,
+              recipient: recipient.replace('@', ''),
+              currency: invoice.currency,
+              total: invoice.total.toString()
+            }
           })
         }
       ]
 
-      // 4. Sign and broadcast the transaction
+      // 5. Sign and broadcast the transaction
       let privateKey: PrivateKey
       try {
         privateKey = PrivateKey.fromString(this.config.postingKey)
@@ -313,7 +330,7 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
 
       let result: any
       try {
-        result = await this.client.broadcast.sendOperations([customJsonOp], privateKey)
+        result = await this.client.broadcast.sendOperations([postOp], privateKey)
       } catch (error) {
         // Handle specific blockchain errors
         if (error instanceof Error) {
@@ -342,7 +359,7 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
         }
         
         throw new BlockchainBroadcastError(
-          `Failed to broadcast transaction to blockchain: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to broadcast post to blockchain: ${error instanceof Error ? error.message : String(error)}`,
           error instanceof Error ? error : undefined
         )
       }
@@ -351,18 +368,20 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
         throw new BlockchainBroadcastError('Blockchain broadcast succeeded but no transaction ID returned')
       }
 
-      console.log('✅ Encrypted invoice data stored successfully!', {
+      console.log('✅ Encrypted invoice post stored successfully!', {
         txId: result.id,
         invoiceId: invoice.id,
+        permlink: permlink,
         blockNum: result.block_num,
-        trxNum: result.trx_num
+        trxNum: result.trx_num,
+        contentSize: encryptedPayload.length
       })
 
-      // 5. Return transaction ID and encrypted payload
-      return { txId: result.id, encryptedPayload }
+      // 6. Return transaction ID, encrypted payload, and permlink
+      return { txId: result.id, encryptedPayload, permlink }
 
     } catch (error) {
-      console.error('❌ Failed to store encrypted invoice data:', error)
+      console.error('❌ Failed to store encrypted invoice post:', error)
       
       // Re-throw known error types without wrapping
       if (error instanceof MemoCryptoError || 
@@ -379,104 +398,109 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
       
       // Wrap unknown errors
       throw new BlockchainBroadcastError(
-        `Failed to store encrypted invoice data: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to store encrypted invoice post: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error : undefined
       )
     }
   }
 
   /**
-   * Fetches encrypted invoice data from the Hive blockchain
+   * Fetches encrypted invoice data from the Hive blockchain (from posts)
    * @param invoiceId - The ID of the invoice to retrieve
    * @returns The encrypted payload string or null if not found
    */
   async fetchEncryptedInvoice(invoiceId: string): Promise<string | null> {
     try {
-      console.log('Fetching encrypted invoice data:', { invoiceId })
+      console.log('Fetching encrypted invoice post:', { invoiceId })
 
-      // Get account history for the configured account
-      // Start from most recent operations and work backwards
-      let start = -1
-      const limit = 1000 // Maximum allowed by Hive API
-      let found = false
-      let encryptedPayload: string | null = null
+      // Get posts by the account in the hivevoice-invoices category
+      const posts = await this.client.database.getDiscussionsByBlog({
+        tag: this.config.username,
+        start_author: '',
+        start_permlink: '',
+        limit: 100
+      })
 
-      while (!found && start !== 0) {
-        try {
-          const history = await this.client.database.getAccountHistory(
-            this.config.username,
-            start,
-            limit
-          ) as any[]
-
-          if (!history || history.length === 0) {
-            break
-          }
-
-          // Process operations in reverse chronological order (most recent first)
-          for (let i = history.length - 1; i >= 0; i--) {
-            const [opNum, operation] = history[i]
-            const op = operation.op as [string, any]
-            const [opType, opData] = op
-
-            // Look for custom_json operations with our specific ID
-            if (opType === 'custom_json' && opData.id === 'hivevoice_invoice_data') {
-              try {
-                const jsonData = JSON.parse(opData.json)
-                
-                // Check if this is the invoice we're looking for
-                if (jsonData.action === 'invoice_data' && jsonData.invoice_id === invoiceId) {
-                  encryptedPayload = jsonData.payload
-                  found = true
-                  
-                  console.log('✅ Found encrypted invoice data:', {
-                    invoiceId,
-                    txId: operation.trx_id,
-                    blockNum: operation.block,
-                    opNum
-                  })
-                  
-                  break
-                }
-              } catch (parseError) {
-                // Skip malformed JSON operations
-                console.warn('Skipping malformed custom_json operation:', parseError)
-                continue
-              }
-            }
-          }
-
-          if (found) {
-            break
-          }
-
-          // Update start position for next batch (going backwards)
-          if (history.length > 0) {
-            start = history[0][0] - 1
-          } else {
-            break
-          }
-
-          // Prevent infinite loops
-          if (start < 0) {
-            break
-          }
-
-        } catch (historyError) {
-          console.error('Error fetching account history:', historyError)
-          break
-        }
-      }
-
-      if (!found) {
-        console.log('❌ Encrypted invoice data not found:', { invoiceId })
+      if (!posts || posts.length === 0) {
+        console.log('❌ No posts found for account:', this.config.username)
         return null
       }
 
-      return encryptedPayload
+      // Look for invoice posts
+      for (const post of posts) {
+        try {
+          // Check if this is a hivevoice invoice post
+          if (post.category === 'hivevoice-invoices' && post.author === this.config.username) {
+            // Parse metadata to check invoice ID
+            const metadata = JSON.parse(post.json_metadata || '{}')
+            if (metadata.invoice && metadata.invoice.id === invoiceId) {
+              // Extract encrypted payload from post body
+              const body = post.body || ''
+              if (body.startsWith('#ENCRYPTED_INVOICE\n')) {
+                const encryptedPayload = body.substring('#ENCRYPTED_INVOICE\n'.length)
+                
+                console.log('✅ Found encrypted invoice post:', {
+                  invoiceId,
+                  permlink: post.permlink,
+                  author: post.author,
+                  created: post.created,
+                  contentSize: encryptedPayload.length
+                })
+                
+                return encryptedPayload
+              }
+            }
+          }
+        } catch (parseError) {
+          // Skip posts with malformed metadata
+          console.warn('Skipping post with malformed metadata:', parseError)
+          continue
+        }
+      }
+
+      // If not found in blog posts, try searching by discussions in category
+      try {
+        const categoryPosts = await this.client.database.getDiscussionsByCreated({
+          tag: 'hivevoice-invoices',
+          start_author: '',
+          start_permlink: '',
+          limit: 100
+        })
+
+        for (const post of categoryPosts) {
+          try {
+            if (post.author === this.config.username) {
+              const metadata = JSON.parse(post.json_metadata || '{}')
+              if (metadata.invoice && metadata.invoice.id === invoiceId) {
+                const body = post.body || ''
+                if (body.startsWith('#ENCRYPTED_INVOICE\n')) {
+                  const encryptedPayload = body.substring('#ENCRYPTED_INVOICE\n'.length)
+                  
+                  console.log('✅ Found encrypted invoice post in category:', {
+                    invoiceId,
+                    permlink: post.permlink,
+                    author: post.author,
+                    created: post.created
+                  })
+                  
+                  return encryptedPayload
+                }
+              }
+            }
+          } catch (parseError) {
+            console.warn('Skipping post with malformed metadata:', parseError)
+            continue
+          }
+        }
+      } catch (categoryError) {
+        console.warn('Failed to search category posts:', categoryError)
+      }
+
+      console.log('❌ Encrypted invoice post not found:', { invoiceId })
+      return null
 
     } catch (error) {
-      console.error('❌ Failed to fetch encrypted invoice data:', error)
+      console.error('❌ Failed to fetch encrypted invoice post:', error)
       
       let errorMessage = 'Unknown error'
       if (error instanceof Error) {
@@ -485,7 +509,7 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
         errorMessage = String(error.message)
       }
 
-      throw new Error(`Failed to fetch encrypted invoice data: ${errorMessage}`)
+      throw new Error(`Failed to fetch encrypted invoice post: ${errorMessage}`)
     }
   }
 }

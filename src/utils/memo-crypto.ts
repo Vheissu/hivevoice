@@ -26,6 +26,7 @@ export class MissingKeyError extends MemoCryptoError {
 
 /**
  * Encrypts a JSON object as a memo string using dhive memo system
+ * Both sender and recipient can decrypt using their respective private keys
  * 
  * @param plain - The object to encrypt
  * @param fromPrivMemo - The sender's private memo key (WIF format)
@@ -92,16 +93,77 @@ export function encryptJSON(plain: object, fromPrivMemo: string, toPubMemo: stri
 
 /**
  * Decrypts a memo string back to a JSON object using dhive memo system
+ * Works for both sender (with sender private key) and recipient (with recipient private key)
  * 
  * @param cipher - The encrypted memo string to decrypt
- * @param toPrivMemo - The recipient's private memo key (WIF format)
- * @param fromPubMemo - The sender's public memo key
+ * @param toPrivMemo - The decryptor's private memo key (WIF format)
+ * @param fromPubMemo - The other party's public memo key (optional, used for validation)
  * @returns Decrypted object
  * @throws {MissingKeyError} When keys are missing or empty
  * @throws {InvalidKeyError} When keys are invalid format
  * @throws {MemoCryptoError} When decryption fails or JSON is invalid
  */
-export function decryptJSON(cipher: string, toPrivMemo: string, fromPubMemo: string): object {
+/**
+ * Estimates the size of encrypted memo data in bytes
+ * Used to validate against Hive's 2048 byte memo limit
+ * 
+ * @param plain - The object to estimate size for
+ * @returns Estimated encrypted size in bytes
+ */
+export function estimateEncryptedSize(plain: object): number {
+  // 1. Serialize JSON to string
+  const jsonString = JSON.stringify(plain);
+  
+  // 2. Add # prefix per Hive spec
+  const messageWithPrefix = '#' + jsonString;
+  
+  // 3. Calculate AES encryption overhead (16 bytes IV + padding)
+  const aesOverhead = 32; // Conservative estimate
+  
+  // 4. Calculate Base64 encoding overhead (33-37% increase)
+  const base64Overhead = Math.ceil((messageWithPrefix.length + aesOverhead) * 1.37);
+  
+  return base64Overhead;
+}
+
+/**
+ * Validates if the object will fit within Hive's memo size limits when encrypted
+ * 
+ * @param plain - The object to validate
+ * @param maxSizeBytes - Maximum size in bytes (default: 2048 for Hive)
+ * @returns Validation result with size info
+ */
+export function validateMemoSize(plain: object, maxSizeBytes: number = 2048): {
+  isValid: boolean;
+  estimatedSize: number;
+  maxSize: number;
+  compressionSuggestions?: string[];
+} {
+  const estimatedSize = estimateEncryptedSize(plain);
+  const isValid = estimatedSize <= maxSizeBytes;
+  
+  const result = {
+    isValid,
+    estimatedSize,
+    maxSize: maxSizeBytes
+  };
+  
+  if (!isValid) {
+    const compressionSuggestions = [
+      'Remove optional fields (shareableLink, etc.)',
+      'Truncate long descriptions',
+      'Use shorter field names',
+      'Store only essential data on-chain',
+      'Use abbreviations for common values'
+    ];
+    
+    return { ...result, compressionSuggestions };
+  }
+  
+  return result;
+}
+
+export function decryptJSON(cipher: string, toPrivMemo: string, fromPubMemo?: string): object {
   // Validate inputs
   if (!cipher || cipher.trim() === '') {
     throw new MemoCryptoError('Cipher text cannot be empty');
@@ -111,15 +173,15 @@ export function decryptJSON(cipher: string, toPrivMemo: string, fromPubMemo: str
     throw new MissingKeyError('To private memo key is required');
   }
   
-  if (!fromPubMemo || fromPubMemo.trim() === '') {
-    throw new MissingKeyError('From public memo key is required');
-  }
+  // fromPubMemo is optional for dhive decryption - the cipher contains sender info
+  // We keep this parameter for backward compatibility but don't require it
 
   try {
     // 1. Create PrivateKey instance
     const privateKey = PrivateKey.fromString(toPrivMemo);
     
     // 2. Decrypt using dhive Memo.decode (only needs private key and cipher)
+    // dhive automatically handles bi-directional decryption - both parties can decrypt
     const decryptedMessage = Memo.decode(privateKey, cipher);
     
     // 3. Remove the # prefix per Hive spec

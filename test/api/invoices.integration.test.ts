@@ -17,11 +17,12 @@ describe('Invoice API - Encryption Integration Test', () => {
   };
 
   beforeAll(async () => {
-    // Set env vars for encryption
+    // Set env vars for encryption and auth
     process.env.HIVE_MEMO_KEY = testKeys.serverPrivate;
     process.env.HIVE_USERNAME = 'test-server-account';
     process.env.HIVE_POSTING_KEY = PrivateKey.fromSeed('test-posting-seed').toString();
     process.env.DB_PATH = ':memory:'; // Use in-memory DB for tests
+    process.env.SESSION_SECRET = 'test-session-secret'; // Set session secret for auth
 
     await db.initialize();
 
@@ -38,13 +39,6 @@ describe('Invoice API - Encryption Integration Test', () => {
       }
       return null;
     });
-
-    // Create a user and session for auth
-    await db.run('INSERT INTO users (username, password, session_token) VALUES (?, ?, ?)', [
-      'test-admin',
-      'hashed-password',
-      'test-session-token'
-    ]);
 
     // Start server
     server = serve({
@@ -78,7 +72,7 @@ describe('Invoice API - Encryption Integration Test', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Cookie': 'session_token=test-session-token',
+        'Cookie': 'session_id=test-session-secret',
       },
       body: JSON.stringify(newInvoice),
     });
@@ -93,7 +87,7 @@ describe('Invoice API - Encryption Integration Test', () => {
     // 2. Retrieve the invoice
     const getRes = await fetch(`http://localhost:${port}/api/invoices/${invoiceId}`, {
       headers: {
-        'Cookie': 'session_token=test-session-token',
+        'Cookie': 'session_id=test-session-secret',
       },
     });
 

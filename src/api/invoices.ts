@@ -6,7 +6,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { db } from '../database/schema.js'
 import { hiveService } from '../services/hive.js'
 import { currencyService } from '../services/currency.js'
-import { decryptJSON } from '../utils/memo-crypto.js'
+import { decryptJSON, MemoCryptoError } from '../utils/memo-crypto.js'
 
 const invoices = new Hono()
 
@@ -235,7 +235,7 @@ invoices.get('/', async (c) => {
     const invoicesData = await db.all(`
       SELECT 
         id, invoice_number, client_name, client_hive_address, encrypted_data,
-        subtotal, tax, total, currency, hive_conversion_data, status, created_at, updated_at, due_date, hive_transaction_id
+        subtotal, tax, total, currency, hive_conversion_data, status, created_at, updated_at, due_date, hive_transaction_id, hive_permlink
       FROM invoices 
       ORDER BY created_at DESC
     `) as any[]
@@ -266,7 +266,7 @@ invoices.get('/:id', async (c) => {
     const invoiceData = await db.get(`
       SELECT 
         id, invoice_number, client_name, client_hive_address, encrypted_data,
-        subtotal, tax, total, currency, hive_conversion_data, status, created_at, updated_at, due_date, hive_transaction_id
+        subtotal, tax, total, currency, hive_conversion_data, status, created_at, updated_at, due_date, hive_transaction_id, hive_permlink
       FROM invoices 
       WHERE id = ?
     `, [id]) as any
@@ -375,29 +375,47 @@ invoices.post('/', zValidator('json', createInvoiceSchema), async (c) => {
       dueDate: data.dueDate
     }
     
-    // Try to store encrypted invoice data on Hive blockchain
+    // Store encrypted invoice data as post on Hive blockchain (PRIMARY STORAGE)
     try {
-      const { txId, encryptedPayload } = await hiveService.instance.storeEncryptedInvoice(invoice, data.clientHiveAddress)
+      const { txId, encryptedPayload, permlink } = await hiveService.instance.storeEncryptedInvoice(invoice, data.clientHiveAddress)
       
-      // Update the database with the transaction ID and encrypted data
+      // Update the database with the transaction ID, permlink, and encrypted data (CACHE)
       await db.run(`
         UPDATE invoices 
-        SET hive_transaction_id = ?, encrypted_data = ?, updated_at = ?
+        SET hive_transaction_id = ?, hive_permlink = ?, encrypted_data = ?, updated_at = ?
         WHERE id = ?
-      `, [txId, encryptedPayload, new Date().toISOString(), invoiceId])
+      `, [txId, permlink, encryptedPayload, new Date().toISOString(), invoiceId])
       
       // Update the invoice object for the response
       invoice.hiveTransactionId = txId
       
-      console.log('✅ Invoice encrypted and stored on Hive blockchain:', {
+      console.log('✅ Invoice encrypted and stored as Hive post (primary):', {
         invoiceId,
         txId,
-        clientHiveAddress: data.clientHiveAddress
+        permlink,
+        clientHiveAddress: data.clientHiveAddress,
+        contentSize: encryptedPayload.length
       })
       
     } catch (encryptionError) {
-      // Log the error but continue - SQLite record is still valid for backward compatibility
-      console.warn('⚠️ Failed to encrypt/store invoice on Hive blockchain (SQLite record preserved):', encryptionError)
+      // For blockchain-first approach, encryption failure should be an error
+      console.error('❌ Failed to encrypt/store invoice on Hive blockchain:', encryptionError)
+      
+      // Clean up the database record since blockchain storage failed
+      await db.run(`DELETE FROM invoices WHERE id = ?`, [invoiceId])
+      await db.run(`DELETE FROM invoice_items WHERE invoice_id = ?`, [invoiceId])
+      
+      if (encryptionError instanceof MemoCryptoError) {
+        return c.json({ 
+          error: 'Failed to encrypt invoice data',
+          details: encryptionError.message
+        }, 400)
+      }
+      
+      return c.json({ 
+        error: 'Failed to store invoice on blockchain',
+        details: encryptionError instanceof Error ? encryptionError.message : String(encryptionError)
+      }, 500)
     }
     
     return c.json({ invoice }, 201)
