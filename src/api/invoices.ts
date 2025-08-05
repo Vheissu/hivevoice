@@ -493,20 +493,35 @@ invoices.post('/notify/:id', zValidator('json', hiveTransferSchema), async (c) =
   const data = c.req.valid('json')
   
   try {
+    // Use the invoiceId from the request body if available, otherwise fall back to URL param
+    const actualInvoiceId = data.invoiceId || invoiceId
+    
+    console.log('Looking for invoice notification:', {
+      urlParam: invoiceId,
+      bodyParam: data.invoiceId,
+      actualInvoiceId,
+      clientHiveAddress: data.clientHiveAddress
+    })
+    
     // Get the invoice to create the notification message
     const invoiceData = await db.get(`
-      SELECT invoice_number, client_hive_address, total
+      SELECT invoice_number, client_hive_address, total, currency 
       FROM invoices 
       WHERE id = ?
-    `, [invoiceId]) as any
+    `, [actualInvoiceId]) as any
 
     if (!invoiceData) {
+      console.error('Invoice not found in database:', {
+        searchedId: actualInvoiceId,
+        urlParam: invoiceId,
+        bodyParam: data.invoiceId
+      })
       return c.json({ error: 'Invoice not found' }, 404)
     }
 
     // Create the transfer memo
-    const shareableLink = `${process.env.FRONTEND_URL || 'http://localhost:9000'}/invoices/${invoiceId}`
-    const memo = data.message || `Invoice ${invoiceData.invoice_number} from @${process.env.HIVE_USERNAME} - Amount: ${invoiceData.total} - ${shareableLink}`
+    const shareableLink = `${process.env.FRONTEND_URL || 'http://localhost:9000'}/invoices/${actualInvoiceId}`
+    const memo = data.message || `Invoice ${invoiceData.invoice_number} from @${process.env.HIVE_USERNAME} - Amount: ${invoiceData.total} ${invoiceData.currency || 'USD'} - ${shareableLink}`
 
     // Send the Hive transfer with memo
     const result = await hiveService.instance.sendTransfer(
@@ -517,12 +532,14 @@ invoices.post('/notify/:id', zValidator('json', hiveTransferSchema), async (c) =
     )
 
     if (result.success) {
-      // Update the invoice with the transaction ID
-      await db.run(`
-        UPDATE invoices 
-        SET hive_transaction_id = ?, updated_at = ?
-        WHERE id = ?
-      `, [result.txId, new Date().toISOString(), invoiceId])
+      // Update the invoice with the notification transaction ID
+      // Note: We don't override hive_transaction_id as it's used for the invoice storage transaction
+      // This is a separate notification transaction
+      console.log('✅ Notification sent successfully:', {
+        invoiceId: actualInvoiceId,
+        notificationTxId: result.txId,
+        clientHiveAddress: data.clientHiveAddress
+      })
 
       return c.json({ 
         success: true, 

@@ -68,6 +68,12 @@ export function encryptJSON(plain: object, fromPrivMemo: string, toPubMemo: stri
     
   } catch (error) {
     if (error instanceof Error) {
+      // Check for network ID mismatch (key is for wrong network)
+      if (error.message.includes('network id mismatch') || 
+          error.message.includes('network mismatch')) {
+        throw new InvalidKeyError(`Key network mismatch: The memo key appears to be for a different network (testnet vs mainnet). Please ensure you're using a Hive mainnet memo key. Error: ${error.message}`);
+      }
+      
       // Check for key-related errors
       if (error.message.includes('Invalid private key') || 
           error.message.includes('Invalid public key') ||
@@ -198,6 +204,12 @@ export function decryptJSON(cipher: string, toPrivMemo: string, fromPubMemo?: st
     
   } catch (error) {
     if (error instanceof Error) {
+      // Check for network ID mismatch (key is for wrong network)
+      if (error.message.includes('network id mismatch') || 
+          error.message.includes('network mismatch')) {
+        throw new InvalidKeyError(`Key network mismatch: The memo key appears to be for a different network (testnet vs mainnet). Please ensure you're using a Hive mainnet memo key. Error: ${error.message}`);
+      }
+      
       // Check for key-related errors
       if (error.message.includes('Invalid private key') || 
           error.message.includes('Invalid public key') ||
