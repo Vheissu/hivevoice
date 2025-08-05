@@ -9,6 +9,59 @@ import { currencyService } from '../services/currency.js'
 
 const invoices = new Hono()
 
+// Public endpoints (no auth required)
+// Endpoint to get supported currencies and current exchange rates
+invoices.get('/currencies', async (c) => {
+  try {
+    const rates = await currencyService.getExchangeRates()
+    
+    // Transform data to match frontend expectations
+    const currencyDetails = [
+      { currency: 'USD' as const, symbol: '$', name: 'US Dollar', key: 'usd' as const },
+      { currency: 'GBP' as const, symbol: '£', name: 'British Pound', key: 'gbp' as const },
+      { currency: 'EUR' as const, symbol: '€', name: 'Euro', key: 'eur' as const },
+      { currency: 'AUD' as const, symbol: 'A$', name: 'Australian Dollar', key: 'aud' as const },
+      { currency: 'NZD' as const, symbol: 'NZ$', name: 'New Zealand Dollar', key: 'nzd' as const }
+    ]
+    
+    const transformedCurrencies = currencyDetails.map(detail => ({
+      currency: detail.currency,
+      symbol: detail.symbol,
+      name: detail.name,
+      hiveRate: rates.hive[detail.key],
+      hbdRate: rates.hive_dollar[detail.key],
+      lastUpdated: new Date(rates.timestamp).toISOString()
+    }))
+    
+    return c.json({ 
+      currencies: transformedCurrencies,
+      timestamp: rates.timestamp
+    })
+  } catch (error) {
+    console.error('Error fetching currencies:', error)
+    return c.json({ error: 'Failed to fetch currency data' }, 500)
+  }
+})
+
+// Endpoint to convert an amount from one currency to HIVE/HBD
+const convertCurrencySchema = z.object({
+  amount: z.number().positive(),
+  fromCurrency: z.enum(['USD', 'GBP', 'EUR', 'AUD', 'NZD'])
+})
+
+invoices.post('/convert', zValidator('json', convertCurrencySchema), async (c) => {
+  const data = c.req.valid('json')
+  
+  try {
+    const result = await currencyService.convertCurrency(data.amount, data.fromCurrency)
+    return c.json({ conversion: result })
+  } catch (error) {
+    console.error('Error converting currency:', error)
+    return c.json({ error: 'Failed to convert currency' }, 500)
+  }
+})
+
+// Apply auth middleware to all remaining routes
 invoices.use('*', authMiddleware)
 
 const createInvoiceSchema = z.object({
@@ -237,13 +290,26 @@ invoices.delete('/:id', async (c) => {
   const id = c.req.param('id')
   
   try {
-    // Check if invoice exists and delete it
+    // First check if the invoice exists
+    const existingInvoice = await db.get(`
+      SELECT id FROM invoices WHERE id = ?
+    `, [id])
+
+    if (!existingInvoice) {
+      return c.json({ error: 'Invoice not found' }, 404)
+    }
+
+    // Delete the invoice (CASCADE will handle related records)
     const result = await db.run(`
       DELETE FROM invoices WHERE id = ?
     `, [id])
 
-    if (result.changes === 0) {
-      return c.json({ error: 'Invoice not found' }, 404)
+    // Check if the deletion was successful
+    // Handle the case where result might be undefined or not have changes property
+    if (result && typeof result === 'object' && 'changes' in result) {
+      if (result.changes === 0) {
+        return c.json({ error: 'Failed to delete invoice' }, 500)
+      }
     }
 
     return c.json({ message: `Invoice ${id} deleted successfully` })
@@ -311,41 +377,6 @@ invoices.post('/notify/:id', zValidator('json', hiveTransferSchema), async (c) =
   } catch (error) {
     console.error('Error sending Hive notification:', error)
     return c.json({ error: 'Failed to send Hive notification' }, 500)
-  }
-})
-
-// Endpoint to get supported currencies and current exchange rates
-invoices.get('/currencies', async (c) => {
-  try {
-    const currencies = currencyService.getSupportedCurrencies()
-    const rates = await currencyService.getExchangeRates()
-    
-    return c.json({ 
-      currencies,
-      exchangeRates: rates,
-      lastUpdated: new Date(rates.timestamp).toISOString()
-    })
-  } catch (error) {
-    console.error('Error fetching currencies:', error)
-    return c.json({ error: 'Failed to fetch currency data' }, 500)
-  }
-})
-
-// Endpoint to convert an amount from one currency to HIVE/HBD
-const convertCurrencySchema = z.object({
-  amount: z.number().positive(),
-  currency: z.enum(['USD', 'GBP', 'EUR', 'AUD', 'NZD'])
-})
-
-invoices.post('/convert', zValidator('json', convertCurrencySchema), async (c) => {
-  const data = c.req.valid('json')
-  
-  try {
-    const result = await currencyService.convertCurrency(data.amount, data.currency)
-    return c.json({ conversion: result })
-  } catch (error) {
-    console.error('Error converting currency:', error)
-    return c.json({ error: 'Failed to convert currency' }, 500)
   }
 })
 

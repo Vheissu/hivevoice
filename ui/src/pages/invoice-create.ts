@@ -28,7 +28,6 @@ export class InvoiceCreate {
   public availableCurrencies: CurrencyRate[] = [];
   public isLoadingCurrencies = false;
   public conversionInfo: ConvertAmountResponse | null = null;
-  public isConverting = false;
 
   // Expose hiveAuth to template
   get hiveAuth() {
@@ -112,24 +111,32 @@ export class InvoiceCreate {
     this.updateConversion();
   }
 
-  private async updateConversion() {
+  private updateConversion() {
     if (this.total <= 0) {
       this.conversionInfo = null;
       return;
     }
 
-    this.isConverting = true;
-    try {
-      this.conversionInfo = await this.apiService.convertAmount({
-        amount: this.total,
-        fromCurrency: this.invoice.currency
-      });
-    } catch (error) {
-      console.error('Failed to convert amount:', error);
+    // Find the selected currency rates
+    const selectedCurrency = this.availableCurrencies.find(c => c.currency === this.invoice.currency);
+    if (!selectedCurrency) {
       this.conversionInfo = null;
-    } finally {
-      this.isConverting = false;
+      return;
     }
+
+    // Calculate conversion locally using the rates we already have
+    // The rates represent: 1 HIVE = X currency units, so to convert FROM currency TO HIVE, we divide
+    this.conversionInfo = {
+      originalAmount: this.total,
+      originalCurrency: this.invoice.currency,
+      hiveAmount: parseFloat((this.total / selectedCurrency.hiveRate).toFixed(3)),
+      hbdAmount: parseFloat((this.total / selectedCurrency.hbdRate).toFixed(2)),
+      exchangeRate: {
+        hive: selectedCurrency.hiveRate,
+        hbd: selectedCurrency.hbdRate
+      },
+      timestamp: Date.now()
+    };
   }
 
   onCurrencyChange() {

@@ -94,10 +94,10 @@ export class Invoices {
 
     try {
       const response = await this.apiService.deleteInvoice(invoice.id);
-      if (!response.error) {
-        await this.loadInvoices();
-      } else {
+      if (response.error) {
         alert(response.error);
+      } else {
+        await this.loadInvoices();
       }
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to delete invoice');

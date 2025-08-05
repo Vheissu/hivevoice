@@ -229,10 +229,6 @@
                   Exchange rates: ${conversionInfo.exchangeRate.hive.toFixed(3)} HIVE, ${conversionInfo.exchangeRate.hbd.toFixed(2)} HBD per ${invoice.currency}
                 </div>
               </div>
-              <div if.bind="isConverting" class="flex items-center mt-2">
-                <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                <span class="text-xs text-blue-600">Updating conversion...</span>
-              </div>
             </div>
           </div>
         </div>
