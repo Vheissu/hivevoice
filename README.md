@@ -24,9 +24,10 @@ A modern, self-hosted invoicing system that leverages the Hive blockchain for tr
 
 ### 🛡️ **Self-Hosted & Secure**
 - **Complete Control**: Host on your VPS, Raspberry Pi, or laptop
+- **Encrypted Invoices**: Optional end-to-end memo encryption for privacy
 - **No SaaS Lock-in**: Your data stays with you
 - **SQLite Database**: Lightweight, no additional database server required
-- **Secure Keys**: Uses posting and active keys (no owner key needed)
+- **Secure Keys**: Uses posting, active, and memo keys (owner key never needed)
 
 ## 🏗️ Architecture
 
@@ -57,7 +58,7 @@ A modern, self-hosted invoicing system that leverages the Hive blockchain for tr
 - **Node.js** 20 or later
 - **Package Manager**: yarn, npm, or pnpm  
 - **Hive Account**: Get one at [signup.hive.io](https://signup.hive.io)
-- **Hive Keys**: Posting and active keys required (safe for self-hosted apps)
+- **Hive Keys**: Posting, active, and memo keys required for full functionality
 - **SQLite 3**: Usually pre-installed on Linux/macOS
 
 ### 1. Clone & Install
@@ -95,6 +96,7 @@ FRONTEND_URL=http://localhost:5173
 HIVE_USERNAME=your-hive-username
 HIVE_POSTING_KEY=5JYourPostingKeyHere...
 HIVE_ACTIVE_KEY=5JYourActiveKeyHere...
+HIVE_MEMO_KEY=5JYourMemoKeyHere... # Optional, for encrypted invoices
 HIVE_NODES=https://api.hive.blog,https://api.openhive.network
 
 # Database Configuration
@@ -105,7 +107,11 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=your-secure-password
 ```
 
-> ⚠️ **Security Note**: Both posting and active keys are required. The posting key is used for storing invoices on-chain, and the active key is used for payment notifications and transfers. Your owner key is never needed.
+> ⚠️ **Security Note**: 
+> - **Posting Key**: Used for storing invoices on-chain (social actions).
+> - **Active Key**: Used for payment notifications and transfers (financial actions).
+> - **Memo Key**: Used for encrypting/decrypting invoice data. Optional but recommended.
+> - Your **owner key** is never needed.
 
 ### 3. Start Development Servers
 
@@ -172,12 +178,44 @@ The system monitors the Hive blockchain every 10 seconds and updates invoice sta
 | `HIVE_USERNAME` | Yes | Your Hive account username |
 | `HIVE_POSTING_KEY` | Yes | Posting key for blockchain operations |
 | `HIVE_ACTIVE_KEY` | Yes | Active key for transfers and notifications |
+| `HIVE_MEMO_KEY` | No | Private memo key for invoice encryption (optional) |
 | `HIVE_NODES` | No | Comma-separated list of Hive API nodes |
 | `DATABASE_PATH` | No | SQLite database file path |
 | `ADMIN_USERNAME` | Yes | Web interface admin username |
 | `ADMIN_PASSWORD` | Yes | Web interface admin password |
 
-### Hive Node Configuration
+### Generating Hive Keys
+
+To use all features, you will need your **posting**, **active**, and **memo** keys. Here’s how to get them:
+
+#### Method 1: HiveKeychain (Easy)
+1. Install the [HiveKeychain browser extension](https://hive-keychain.com/).
+2. Import your Hive account using your master password.
+3. Go to **Settings > Keys** to view and copy your posting, active, and memo keys.
+
+#### Method 2: cli_wallet (Advanced)
+For advanced users, the `cli_wallet` provides a secure, command-line method:
+
+```bash
+# Connect to a Hive node
+cli_wallet -s wss://api.hive.blog
+
+# Unlock your wallet
+unlock "YOUR_WALLET_PASSWORD"
+
+# Derive keys from your master password
+get_private_key_from_password your_account_name owner YOUR_MASTER_PASSWORD
+get_private_key_from_password your_account_name active YOUR_MASTER_PASSWORD
+get_private_key_from_password your_account_name posting YOUR_MASTER_PASSWORD
+get_private_key_from_password your_account_name memo YOUR_MASTER_PASSWORD
+```
+
+
+### Backward Compatibility & Migration
+
+- **Legacy Invoices**: Invoices created before the memo-key feature was introduced will continue to function without encryption.
+- **Optional Encryption**: The `HIVE_MEMO_KEY` is only required if you want to use the encrypted invoice feature.
+- **Migrating Old Invoices**: To encrypt an old, unencrypted invoice, simply open it in the UI, make a small edit (like adding a note), and re-save it. This will automatically encrypt and update the invoice on the blockchain.
 
 For better reliability, configure multiple Hive API nodes:
 
