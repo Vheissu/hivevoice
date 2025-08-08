@@ -12,7 +12,9 @@ import type {
   CurrenciesResponse,
   ConvertAmountRequest,
   ConvertAmountResponse,
-  InvoicePayment
+  InvoicePayment,
+  QRCodeRequest,
+  QRCodeResponse
 } from '../types/index';
 
 export interface IApiService {
@@ -29,6 +31,7 @@ export interface IApiService {
   getCurrencies(): Promise<CurrenciesResponse>;
   convertAmount(data: ConvertAmountRequest): Promise<ConvertAmountResponse>;
   getInvoicePayments(id: string): Promise<{ payments: InvoicePayment }>;
+  generateQRCode(data: QRCodeRequest): Promise<QRCodeResponse>;
 }
 
 export const IApiService = DI.createInterface<IApiService>('IApiService', (x) => x.singleton(ApiService));
@@ -432,5 +435,13 @@ export class ApiService implements IApiService {
         }
       };
     }
+  }
+
+  async generateQRCode(data: QRCodeRequest): Promise<QRCodeResponse> {
+    return this.handleJsonResponse(
+      this.httpClient.post('/invoices/qr-code', JSON.stringify(data), {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    );
   }
 }

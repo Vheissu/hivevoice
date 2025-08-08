@@ -7,6 +7,8 @@ import { IApiService } from './services/api';
 import { IAuthService } from './services/auth';
 import { IInvoiceService } from './services/invoice';
 import { IPaymentService } from './services/payment';
+import { IQRCodeService } from './services/qr-code';
+import { QRCode } from './components/qr-code';
 
 Aurelia
   .register(
@@ -18,7 +20,9 @@ Aurelia
     IApiService,
     IAuthService,
     IInvoiceService,
-    IPaymentService
+    IPaymentService,
+    IQRCodeService,
+    QRCode
   )
   .app(MyApp)
   .start();

@@ -1,5 +1,6 @@
 import { IApiService } from '../services/api';
 import { IPaymentService, PaymentRequest, PaymentResponse } from '../services/payment';
+import { IQRCodeService } from '../services/qr-code';
 import { resolve } from 'aurelia';
 import { IRouteViewModel } from '@aurelia/router';
 import type { Invoice, SupportedCurrency, InvoicePayment } from '../types/index';
@@ -18,7 +19,8 @@ export class InvoiceDetail implements IRouteViewModel {
 
   constructor(
     private readonly apiService: IApiService = resolve(IApiService),
-    private readonly paymentService: IPaymentService = resolve(IPaymentService)
+    private readonly paymentService: IPaymentService = resolve(IPaymentService),
+    private readonly qrCodeService: IQRCodeService = resolve(IQRCodeService)
   ) {}
 
   async canLoad(params: { id?: string }): Promise<boolean> {

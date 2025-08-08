@@ -13,13 +13,15 @@
     "@aurelia/validation": "^2.0.0-beta.25",
     "aurelia": "latest",
     "hivesigner": "^3.3.4",
-    "keychain-sdk": "^0.9.4"
+    "keychain-sdk": "^0.9.4",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@aurelia/testing": "latest",
     "@aurelia/vite-plugin": "latest",
     "@tailwindcss/vite": "^4.1.10",
     "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.5",
     "eslint": "^9.17.0",
     "globals": "^15.14.0",
     "jsdom": "^25.0.1",

@@ -169,7 +169,7 @@ export function validateMemoSize(plain: object, maxSizeBytes: number = 2048): {
   return result;
 }
 
-export function decryptJSON(cipher: string, toPrivMemo: string, fromPubMemo?: string): object {
+export function decryptJSON(cipher: string, toPrivMemo: string, _fromPubMemo?: string): object {
   // Validate inputs
   if (!cipher || cipher.trim() === '') {
     throw new MemoCryptoError('Cipher text cannot be empty');

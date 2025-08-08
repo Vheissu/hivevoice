@@ -30,6 +30,7 @@
     "dotenv": "^17.2.1",
     "hono": "^4.8.12",
     "node-fetch": "^3.3.2",
+    "qrcode": "^1.5.4",
     "sqlite3": "^5.1.7",
     "uuid": "^11.1.0",
     "zod": "^4.0.14"
@@ -39,6 +40,7 @@
     "@types/cookie": "^1.0.0",
     "@types/node": "^24.2.0",
     "@types/node-fetch": "^2.6.13",
+    "@types/qrcode": "^1.5.5",
     "@types/sqlite3": "latest",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.39.0",

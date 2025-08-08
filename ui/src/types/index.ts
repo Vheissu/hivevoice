@@ -183,3 +183,21 @@ export interface InvoicePayment {
     hbd: number
   }
 }
+
+export type QRCodeType = 'payment' | 'invoice-link' | 'hive-address'
+
+export interface QRCodeRequest {
+  type: QRCodeType
+  invoiceId?: string
+  currency?: 'HIVE' | 'HBD'
+  hiveAddress?: string
+  amount?: string
+  memo?: string
+  size?: number
+}
+
+export interface QRCodeResponse {
+  qrCode: string  // data URL
+  data: string    // the encoded data
+  type: string
+}

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
+import QRCode from 'qrcode'
 import type { Invoice, HiveConversion } from '../types/index.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { db } from '../database/schema.js'
@@ -211,6 +212,121 @@ async function buildInvoiceResponse(invoiceData: any, items: any[]): Promise<Inv
 
   return invoice
 }
+
+// QR Code generation endpoints (public)
+const qrCodeSchema = z.object({
+  type: z.enum(['payment', 'invoice-link', 'hive-address']),
+  invoiceId: z.string().optional(),
+  currency: z.enum(['HIVE', 'HBD']).optional(),
+  hiveAddress: z.string().optional(),
+  amount: z.string().optional(),
+  memo: z.string().optional(),
+  size: z.number().min(100).max(1000).optional().default(300)
+})
+
+invoices.post('/qr-code', zValidator('json', qrCodeSchema), async (c) => {
+  const data = c.req.valid('json')
+  
+  try {
+    let qrData = ''
+    
+    switch (data.type) {
+      case 'payment':
+        if (!data.invoiceId && !data.hiveAddress) {
+          return c.json({ error: 'Invoice ID or Hive address required for payment QR' }, 400)
+        }
+        
+        if (data.invoiceId) {
+          // Get invoice data for payment QR
+          const invoiceData = await db.get(`
+            SELECT client_hive_address, total, currency, hive_conversion_data, invoice_number
+            FROM invoices 
+            WHERE id = ?
+          `, [data.invoiceId]) as any
+          
+          if (!invoiceData) {
+            return c.json({ error: 'Invoice not found' }, 404)
+          }
+          
+          const hiveConversion = invoiceData.hive_conversion_data ? 
+            JSON.parse(invoiceData.hive_conversion_data) : null
+          
+          let amount = '0'
+          const currency = data.currency || 'HBD'
+          
+          if (currency === 'HIVE' && hiveConversion) {
+            amount = hiveConversion.hiveAmount.toFixed(3)
+          } else if (currency === 'HBD' && hiveConversion) {
+            amount = hiveConversion.hbdAmount.toFixed(3)
+          }
+          
+          const memo = data.memo || `Payment for Invoice ${invoiceData.invoice_number}`
+          
+          // Create HiveSigner transfer URL for QR code
+          const params = new URLSearchParams({
+            to: invoiceData.client_hive_address,
+            amount: `${amount} ${currency}`,
+            memo: memo
+          })
+          qrData = `https://hivesigner.com/sign/transfer?${params.toString()}`
+        } else if (data.hiveAddress) {
+          // Generic payment QR with provided data
+          const amount = data.amount || '0'
+          const currency = data.currency || 'HBD'
+          const memo = data.memo || ''
+          
+          // Create HiveSigner transfer URL for QR code
+          const params = new URLSearchParams({
+            to: data.hiveAddress,
+            amount: `${amount} ${currency}`,
+            memo: memo
+          })
+          qrData = `https://hivesigner.com/sign/transfer?${params.toString()}`
+        }
+        break
+        
+      case 'invoice-link':
+        if (!data.invoiceId) {
+          return c.json({ error: 'Invoice ID required for invoice link QR' }, 400)
+        }
+        
+        const baseUrl = process.env.FRONTEND_URL || 'http://localhost:9000'
+        qrData = `${baseUrl}/invoices/${data.invoiceId}`
+        break
+        
+      case 'hive-address':
+        if (!data.hiveAddress) {
+          return c.json({ error: 'Hive address required for address QR' }, 400)
+        }
+        
+        qrData = data.hiveAddress
+        break
+        
+      default:
+        return c.json({ error: 'Invalid QR code type' }, 400)
+    }
+    
+    // Generate QR code as data URL
+    const qrCodeDataURL = await QRCode.toDataURL(qrData, {
+      width: data.size,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    })
+    
+    return c.json({
+      qrCode: qrCodeDataURL,
+      data: qrData,
+      type: data.type
+    })
+    
+  } catch (error) {
+    console.error('Error generating QR code:', error)
+    return c.json({ error: 'Failed to generate QR code' }, 500)
+  }
+})
 
 // Apply auth middleware to all remaining routes
 invoices.use('*', authMiddleware)

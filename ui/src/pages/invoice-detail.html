@@ -159,9 +159,11 @@
           </button>
         </div>
 
-        <div class="text-sm text-gray-600 space-y-2">
+        <div class="text-sm text-gray-600 space-y-4">
           <p>This invoice is stored on the Hive blockchain for transparency and immutability.</p>
           <p if.bind="invoice.hiveTransactionId">Transaction ID: <span class="font-mono text-xs">${invoice.hiveTransactionId}</span></p>
+          
+          <!-- Payment Options Text -->
           <div class="bg-white p-3 rounded border border-blue-200">
             <p class="font-medium text-gray-700 mb-1">Payment Options:</p>
             <ul class="space-y-1 text-xs">
@@ -169,6 +171,59 @@
               <li if.bind="invoice.hiveConversion">• HIVE: ${invoice.hiveConversion.hiveAmount.toFixed(3)} HIVE</li>
               <li if.bind="invoice.hiveConversion">• HBD: ${invoice.hiveConversion.hbdAmount.toFixed(2)} HBD (Hive Backed Dollars)</li>
             </ul>
+          </div>
+
+          <!-- QR Code Section -->
+          <div if.bind="invoice.hiveConversion" class="bg-white p-4 rounded-lg border border-blue-200">
+            <h4 class="font-medium text-gray-900 mb-3 flex items-center">
+              <svg class="h-5 w-5 mr-2 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V6a1 1 0 00-1-1H5a1 1 0 00-1 1v1a1 1 0 001 1zm12 0h2a1 1 0 001-1V6a1 1 0 00-1-1h-2a1 1 0 00-1 1v1a1 1 0 001 1zM5 20h2a1 1 0 001-1v-1a1 1 0 00-1-1H5a1 1 0 00-1 1v1a1 1 0 001 1z" />
+              </svg>
+              Quick Payment QR Codes
+            </h4>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <!-- Payment QR Codes -->
+              <qr-code
+                type="payment"
+                invoice-id.bind="invoice.id"
+                currency="HIVE"
+                hive-address.bind="invoice.clientHiveAddress"
+                amount.bind="invoice.hiveConversion.hiveAmount.toFixed(3)"
+                memo.bind="'Payment for Invoice ' + invoice.invoiceNumber"
+                title="HIVE Payment"
+              ></qr-code>
+              
+              <qr-code
+                type="payment"
+                invoice-id.bind="invoice.id"
+                currency="HBD"
+                hive-address.bind="invoice.clientHiveAddress"
+                amount.bind="invoice.hiveConversion.hbdAmount.toFixed(2)"
+                memo.bind="'Payment for Invoice ' + invoice.invoiceNumber"
+                title="HBD Payment"
+              ></qr-code>
+              
+              <!-- Invoice Link QR Code -->
+              <qr-code
+                type="invoice-link"
+                invoice-id.bind="invoice.id"
+                title="Share Invoice"
+                subtitle="Link to this invoice"
+              ></qr-code>
+            </div>
+
+            <!-- Hive Address QR Code -->
+            <div class="mt-4 pt-4 border-t border-gray-200">
+              <div class="flex justify-center">
+                <qr-code
+                  type="hive-address"
+                  hive-address.bind="invoice.clientHiveAddress"
+                  title="Recipient Address"
+                  subtitle.bind="'@' + invoice.clientHiveAddress"
+                ></qr-code>
+              </div>
+            </div>
           </div>
 
           <!-- Payment Success Message -->
