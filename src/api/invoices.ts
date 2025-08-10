@@ -100,6 +100,92 @@ invoices.post('/convert', zValidator('json', convertCurrencySchema), async (c) =
 })
 
 /**
+ * Determines the current invoice status from blockchain status updates
+ * @param invoiceId - The invoice ID to check
+ * @param originalStatus - The original status from invoice creation
+ * @returns Current status based on blockchain records
+ */
+async function getCurrentBlockchainStatus(invoiceId: string, originalStatus: string): Promise<string> {
+  try {
+    // First, trigger a payment status check to ensure blockchain is up to date
+    console.log('🔄 Triggering payment status check for invoice:', invoiceId)
+    await triggerPaymentStatusUpdate(invoiceId)
+    
+    // Fetch all status updates from blockchain with retry logic for timing issues
+    let statusUpdates = await hiveService.instance.fetchInvoiceStatusUpdates(invoiceId)
+    
+    // If no updates found but we just triggered an update, wait and retry
+    if (statusUpdates.length === 0) {
+      console.log('⏳ No blockchain status found, waiting 3 seconds for blockchain indexing...')
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      
+      // Retry fetching status updates
+      statusUpdates = await hiveService.instance.fetchInvoiceStatusUpdates(invoiceId)
+      
+      if (statusUpdates.length === 0) {
+        console.log('⏳ Still no status found, waiting 3 more seconds...')
+        await new Promise(resolve => setTimeout(resolve, 3000))
+        
+        // Final retry
+        statusUpdates = await hiveService.instance.fetchInvoiceStatusUpdates(invoiceId)
+      }
+    }
+    
+    if (statusUpdates.length === 0) {
+      // No status updates found after retries, return original status
+      console.log('📊 No blockchain status updates found after retries, using original:', originalStatus)
+      return originalStatus
+    }
+    
+    // Return the most recent status (last in chronological order)
+    const mostRecentUpdate = statusUpdates[statusUpdates.length - 1]
+    console.log('📊 Using blockchain status for invoice:', {
+      invoiceId,
+      originalStatus,
+      blockchainStatus: mostRecentUpdate.status,
+      updatesFound: statusUpdates.length
+    })
+    
+    return mostRecentUpdate.status
+  } catch (error) {
+    console.warn('⚠️ Failed to fetch blockchain status, falling back to original:', {
+      invoiceId,
+      error: error instanceof Error ? error.message : String(error)
+    })
+    return originalStatus
+  }
+}
+
+/**
+ * Manually triggers payment status update for a specific invoice
+ * This ensures the blockchain status is current when invoice is accessed
+ */
+async function triggerPaymentStatusUpdate(invoiceId: string): Promise<void> {
+  try {
+    // Get the invoice from database
+    const invoiceData = await db.get(`
+      SELECT id, invoice_number, status, hive_conversion_data
+      FROM invoices 
+      WHERE id = ?
+    `, [invoiceId]) as any
+
+    if (!invoiceData) {
+      console.warn('Invoice not found for status update:', invoiceId)
+      return
+    }
+
+    // Import payment monitor and trigger status update
+    const { paymentMonitor } = await import('../services/payment-monitor.js')
+    console.log('🎯 Manually triggering payment status update...')
+    
+    // Trigger the status update
+    await paymentMonitor.instance.updateInvoiceStatus(invoiceData)
+  } catch (error) {
+    console.warn('Failed to trigger payment status update:', error)
+  }
+}
+
+/**
  * Helper function to build invoice response with encrypted data handling
  * @param invoiceData - Raw invoice data from database
  * @param items - Invoice items
@@ -153,16 +239,15 @@ async function buildInvoiceResponse(invoiceData: any, items: any[]): Promise<Inv
           const encryptedPayloads = invoiceData.encrypted_data.split('||')
           const decryptedData = reconstructInvoiceFromCustomJSON(encryptedPayloads, clientPublicMemoKey)
           
-          // Merge decrypted fields with base invoice, but preserve current status from database
-          const currentStatus = invoice.status // Preserve database status (updated by payment monitor)
+          // Merge decrypted fields with base invoice, then get current status from blockchain
           invoice = { ...invoice, ...decryptedData }
-          invoice.status = currentStatus // Restore current status (don't overwrite with blockchain status)
+          invoice.status = await getCurrentBlockchainStatus(invoiceData.id, decryptedData.status || invoice.status) as any
           
           console.log('✅ Successfully decrypted custom JSON invoice data:', {
             invoiceId: invoiceData.id,
             payloadCount: encryptedPayloads.length,
             decryptedFields: Object.keys(decryptedData),
-            statusPreserved: currentStatus
+            finalStatus: invoice.status
           })
         } else {
           // Legacy post format - single encrypted payload
@@ -172,15 +257,14 @@ async function buildInvoiceResponse(invoiceData: any, items: any[]): Promise<Inv
             clientPublicMemoKey // client public memo key
           ) as Partial<Invoice>
 
-          // Merge decrypted fields with base invoice, but preserve current status from database
-          const currentStatus = invoice.status // Preserve database status (updated by payment monitor)
+          // Merge decrypted fields with base invoice, then get current status from blockchain
           invoice = { ...invoice, ...decryptedData }
-          invoice.status = currentStatus // Restore current status (don't overwrite with blockchain status)
+          invoice.status = await getCurrentBlockchainStatus(invoiceData.id, decryptedData.status || invoice.status) as any
           
           console.log('✅ Successfully decrypted legacy post invoice data:', {
             invoiceId: invoiceData.id,
             decryptedFields: Object.keys(decryptedData),
-            statusPreserved: currentStatus
+            finalStatus: invoice.status
           })
         }
       } else {
@@ -273,10 +357,9 @@ async function buildInvoiceResponse(invoiceData: any, items: any[]): Promise<Inv
                 })
               }
 
-              // Merge decrypted fields but preserve current status from database
-              const currentStatus = invoice.status // Preserve database status (updated by payment monitor)
+              // Merge decrypted fields then get current status from blockchain
               invoice = { ...invoice, ...decryptedData }
-              invoice.status = currentStatus // Restore current status (don't overwrite with blockchain status)
+              invoice.status = await getCurrentBlockchainStatus(invoiceData.id, decryptedData.status || invoice.status) as any
             } else {
               // Store encrypted data for frontend handling
               invoice.encryptedData = encryptedPayload

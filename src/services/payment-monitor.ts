@@ -23,6 +23,9 @@ export class PaymentMonitorService {
   }
 
   async initialize(): Promise<void> {
+    // One-time cleanup: Remove notification transfers that were incorrectly recorded as payments
+    await this.cleanupNotificationPayments()
+    
     // Get the last processed block from database or start from current block
     const lastBlock = await this.getLastProcessedBlock()
     if (lastBlock > 0) {
@@ -35,6 +38,22 @@ export class PaymentMonitorService {
     }
     
     console.log(`Payment monitor initialized. Starting from block ${this.lastProcessedBlock}`)
+  }
+
+  private async cleanupNotificationPayments(): Promise<void> {
+    try {
+      // Remove 0.001 HIVE payments that are likely notification transfers
+      const result = await db.run(`
+        DELETE FROM payments 
+        WHERE amount = 0.001 AND currency = 'HIVE'
+      `)
+      
+      if (result && 'changes' in result && result.changes && result.changes > 0) {
+        console.log(`🧹 Cleaned up ${result.changes} notification transfers that were incorrectly recorded as payments`)
+      }
+    } catch (error) {
+      console.warn('Failed to cleanup notification payments:', error)
+    }
   }
 
   async startMonitoring(): Promise<void> {
@@ -137,7 +156,19 @@ export class PaymentMonitorService {
         return
       }
 
-      // Find the invoice in database
+      // Filter out notification transfers (small 0.001 HIVE transfers with invoice links)
+      if (amount === 0.001 && currency === 'HIVE') {
+        // Check if memo looks like a notification (contains "Invoice" and URL)
+        const isNotificationMemo = transfer.memo.includes('Invoice') && 
+                                  (transfer.memo.includes('http://') || transfer.memo.includes('https://'))
+        
+        if (isNotificationMemo) {
+          console.log(`🔔 Ignoring notification transfer: ${amount} ${currency} from ${transfer.from} (memo: ${transfer.memo.substring(0, 50)}...)`)
+          return
+        }
+      }
+
+      // Find the invoice in database  
       const invoice = await db.get(`
         SELECT id, invoice_number, status, total, currency as invoice_currency, hive_conversion_data
         FROM invoices 
@@ -147,6 +178,17 @@ export class PaymentMonitorService {
       if (!invoice) {
         console.log(`Invoice ${invoiceNumber} not found for transfer from ${transfer.from}`)
         return
+      }
+
+      // Additional notification filter: Check if it's a self-transfer (same account) with notification characteristics
+      if (transfer.from === transfer.to && amount === 0.001 && currency === 'HIVE') {
+        const isNotificationMemo = transfer.memo.includes('Invoice') && 
+                                  (transfer.memo.includes('http://') || transfer.memo.includes('https://'))
+        
+        if (isNotificationMemo) {
+          console.log(`🔔 Ignoring self-notification transfer: ${amount} ${currency} from ${transfer.from} to ${transfer.to}`)
+          return
+        }
       }
 
       // Check if payment already recorded
@@ -203,13 +245,20 @@ export class PaymentMonitorService {
     return null
   }
 
-  private async updateInvoiceStatus(invoice: any): Promise<void> {
+  async updateInvoiceStatus(invoice: any): Promise<void> {
     try {
+      console.log(`🔍 Updating status for invoice ${invoice.invoice_number} (${invoice.id})`)
+      
       // Get all payments for this invoice
       const payments = await db.all(`
-        SELECT amount, currency FROM payments 
+        SELECT amount, currency, from_account FROM payments 
         WHERE invoice_id = ?
       `, [invoice.id]) as any[]
+
+      console.log(`💳 Found ${payments.length} payments for invoice ${invoice.invoice_number}:`)
+      payments.forEach((p, i) => {
+        console.log(`  Payment ${i + 1}: ${p.amount} ${p.currency} from ${p.from_account || 'unknown'}`)
+      })
 
       // Calculate total paid in HIVE and HBD
       let totalPaidHive = 0
@@ -223,17 +272,21 @@ export class PaymentMonitorService {
         }
       }
 
+      console.log(`💰 Payment totals: ${totalPaidHive} HIVE, ${totalPaidHbd} HBD`)
+
       // Get expected amounts from invoice
       const hiveConversion = invoice.hive_conversion_data ? 
         JSON.parse(invoice.hive_conversion_data) : null
 
       if (!hiveConversion) {
-        console.log(`No HIVE conversion data for invoice ${invoice.invoice_number}`)
+        console.log(`❌ No HIVE conversion data for invoice ${invoice.invoice_number}`)
         return
       }
 
       const expectedHive = hiveConversion.hiveAmount
       const expectedHbd = hiveConversion.hbdAmount
+
+      console.log(`📊 Expected amounts: ${expectedHive} HIVE, ${expectedHbd} HBD`)
 
       // Determine new status
       let newStatus = 'pending'
@@ -244,23 +297,79 @@ export class PaymentMonitorService {
       const hbdFullyPaid = totalPaidHbd >= (expectedHbd - tolerance)
       const anyPaymentMade = totalPaidHive > 0 || totalPaidHbd > 0
 
+      console.log(`🧮 Payment check: hiveFullyPaid=${hiveFullyPaid}, hbdFullyPaid=${hbdFullyPaid}, anyPaymentMade=${anyPaymentMade}`)
+
       if (hiveFullyPaid || hbdFullyPaid) {
         newStatus = 'paid'
       } else if (anyPaymentMade) {
         newStatus = 'partial'
       }
 
-      // Update invoice status if changed
-      if (newStatus !== invoice.status) {
-        await db.run(`
-          UPDATE invoices 
-          SET status = ?, updated_at = ?
-          WHERE id = ?
-        `, [newStatus, new Date().toISOString(), invoice.id])
+      console.log(`📊 Status determination: current="${invoice.status}" → new="${newStatus}"`)
 
-        console.log(`📄 Invoice ${invoice.invoice_number} status updated to: ${newStatus}`)
-        console.log(`   Paid: ${totalPaidHive.toFixed(3)} HIVE, ${totalPaidHbd.toFixed(3)} HBD`)
-        console.log(`   Expected: ${expectedHive.toFixed(3)} HIVE or ${expectedHbd.toFixed(3)} HBD`)
+      // Check if we need to sync current status to blockchain
+      // This handles cases where invoice was marked as paid before blockchain recording was implemented
+      const { hiveService } = await import('./hive.js')
+      let needsBlockchainSync = false
+      
+      if ((invoice.status === 'paid' || invoice.status === 'partial') && newStatus === invoice.status) {
+        // Check if blockchain has status updates for this invoice
+        try {
+          const existingUpdates = await hiveService.instance.fetchInvoiceStatusUpdates(invoice.id)
+          if (existingUpdates.length === 0) {
+            console.log(`⚠️ Invoice ${invoice.invoice_number} is marked as "${invoice.status}" but has no blockchain records. Syncing to blockchain.`)
+            needsBlockchainSync = true
+          }
+        } catch (error) {
+          console.warn(`Failed to check existing blockchain status for ${invoice.invoice_number}:`, error)
+        }
+      }
+
+      // Update invoice status if changed OR if blockchain sync is needed
+      if (newStatus !== invoice.status || needsBlockchainSync) {
+        const actionReason = needsBlockchainSync ? 'blockchain sync' : 'status change'
+        console.log(`🔄 ${actionReason} detected for invoice ${invoice.invoice_number}: ${invoice.status} → ${newStatus}`)
+        
+        try {
+          // 1. Record status update on blockchain (PRIMARY)
+          console.log(`📡 Attempting to record status update on blockchain for invoice ${invoice.invoice_number} (${actionReason})`)
+          const statusTxId = await hiveService.instance.recordInvoiceStatusUpdate(
+            invoice.id,
+            newStatus as 'pending' | 'partial' | 'paid',
+            {
+              totalPaidHive,
+              totalPaidHbd,
+              expectedHive,
+              expectedHbd,
+              latestPaymentTx: 'detected' // Could be enhanced to track specific payment tx
+            }
+          )
+
+          // 2. Update database cache (SECONDARY)
+          await db.run(`
+            UPDATE invoices 
+            SET status = ?, updated_at = ?
+            WHERE id = ?
+          `, [newStatus, new Date().toISOString(), invoice.id])
+
+          console.log(`📄 Invoice ${invoice.invoice_number} status updated to: ${newStatus}`)
+          console.log(`   Paid: ${totalPaidHive.toFixed(3)} HIVE, ${totalPaidHbd.toFixed(3)} HBD`)
+          console.log(`   Expected: ${expectedHive.toFixed(3)} HIVE or ${expectedHbd.toFixed(3)} HBD`)
+          console.log(`   🔗 Blockchain TX: ${statusTxId}`)
+
+        } catch (blockchainError) {
+          console.error(`❌ Failed to record status update on blockchain for invoice ${invoice.invoice_number}:`, blockchainError)
+          
+          // Fallback: Still update cache even if blockchain fails
+          // This prevents the system from breaking while maintaining some functionality
+          await db.run(`
+            UPDATE invoices 
+            SET status = ?, updated_at = ?
+            WHERE id = ?
+          `, [newStatus, new Date().toISOString(), invoice.id])
+          
+          console.log(`⚠️ Invoice ${invoice.invoice_number} status updated in cache only (blockchain failed)`)
+        }
       }
 
     } catch (error) {

@@ -874,6 +874,221 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
       throw new Error(`Failed to fetch encrypted invoice post: ${errorMessage}`)
     }
   }
+
+  /**
+   * Records an invoice status update as a custom JSON operation on the blockchain
+   * @param invoiceId - The invoice ID to update
+   * @param newStatus - The new status ('pending', 'partial', 'paid')
+   * @param paymentDetails - Details about the payment that triggered this update
+   * @returns Transaction ID of the status update operation
+   */
+  async recordInvoiceStatusUpdate(
+    invoiceId: string, 
+    newStatus: 'pending' | 'partial' | 'paid',
+    paymentDetails?: {
+      totalPaidHive: number;
+      totalPaidHbd: number;
+      expectedHive: number;
+      expectedHbd: number;
+      latestPaymentTx?: string;
+    }
+  ): Promise<string> {
+    try {
+      if (!this.config.postingKey) {
+        throw new MissingKeyError('Posting key is required for blockchain operations but not configured')
+      }
+
+      console.log('Recording invoice status update on blockchain:', {
+        invoiceId,
+        newStatus,
+        paymentDetails
+      })
+
+      // Create status update custom JSON operation
+      const statusOp: Operation = [
+        'custom_json',
+        {
+          required_auths: [],
+          required_posting_auths: [this.config.username],
+          id: 'hivevoice_status_v2',
+          json: JSON.stringify({
+            action: 'update_invoice_status',
+            invoice_id: invoiceId,
+            new_status: newStatus,
+            creator: this.config.username,
+            created_timestamp: Date.now(),
+            payment_details: paymentDetails || null,
+            version: '2.0'
+          })
+        }
+      ]
+
+      // Sign and broadcast the transaction
+      const privateKey = PrivateKey.fromString(this.config.postingKey)
+      let result: any
+      try {
+        result = await this.client.broadcast.sendOperations([statusOp], privateKey)
+      } catch (error) {
+        this.handleBroadcastError(error, 'Failed to broadcast invoice status update')
+      }
+
+      if (!result || !result.id) {
+        throw new BlockchainBroadcastError('Status update broadcast succeeded but no transaction ID returned')
+      }
+
+      console.log('✅ Invoice status update recorded on blockchain!', {
+        invoiceId,
+        newStatus,
+        txId: result.id,
+        blockNum: result.block_num
+      })
+
+      // Verify the transaction was actually recorded
+      try {
+        const tx = await this.client.database.getTransaction(result.id)
+        console.log('🔍 Transaction verification:', {
+          txId: result.id,
+          found: !!tx,
+          operations: tx?.operations?.length || 0
+        })
+      } catch (verifyError) {
+        console.warn('⚠️ Could not verify transaction:', result.id, verifyError)
+      }
+
+      return result.id
+
+    } catch (error) {
+      console.error('❌ Failed to record invoice status update on blockchain:', error)
+      
+      // Re-throw known error types without wrapping
+      if (error instanceof BlockchainBroadcastError ||
+          error instanceof InvalidKeyError ||
+          error instanceof MissingKeyError) {
+        throw error
+      }
+      
+      // Wrap unknown errors
+      throw new BlockchainBroadcastError(
+        `Failed to record invoice status update: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error : undefined
+      )
+    }
+  }
+
+  /**
+   * Fetches all status updates for an invoice from custom JSON operations
+   * @param invoiceId - The invoice ID to get status updates for
+   * @returns Array of status updates in chronological order
+   */
+  async fetchInvoiceStatusUpdates(invoiceId: string): Promise<{
+    status: 'pending' | 'partial' | 'paid';
+    timestamp: number;
+    paymentDetails?: any;
+    txId: string;
+  }[]> {
+    try {
+      console.log('Fetching invoice status updates from blockchain:', { invoiceId })
+
+      // Get account history to find status update operations
+      console.log('🔍 Searching account history for status updates:', {
+        account: this.config.username,
+        invoiceId
+      })
+      const history = await this.client.database.getAccountHistory(this.config.username, -1, 1000)
+      console.log(`📜 Retrieved ${history.length} operations from account history`)
+      const statusUpdates: any[] = []
+
+      // Search through account history for status updates
+      let customJsonCount = 0
+      let hivevoiceCount = 0
+      
+      for (const entry of history) {
+        const [operationIndex, transactionData] = entry as [number, any]
+        
+        // The actual operation is nested inside transactionData.op
+        const [operationType, operationData] = transactionData.op || []
+        
+        // Debug: Log operation types we're seeing
+        if (customJsonCount < 5) { // Only log first few to avoid spam
+          console.log('🔍 Operation type found:', operationType)
+        }
+        
+        if (operationType === 'custom_json') {
+          customJsonCount++
+          const customJsonOp = operationData as any
+          
+          // Debug: Log custom JSON IDs we're seeing
+          if (customJsonCount <= 10) { // Log first 10 custom JSONs
+            console.log('📋 Custom JSON found:', {
+              id: customJsonOp.id,
+              author: customJsonOp.required_posting_auths?.[0] || 'unknown'
+            })
+          }
+          
+          try {
+            const jsonData = JSON.parse(customJsonOp.json)
+            
+            // Debug: Log all hivevoice operations we find
+            if (customJsonOp.id.startsWith('hivevoice')) {
+              hivevoiceCount++
+              console.log('🔎 Found hivevoice operation:', {
+                id: customJsonOp.id,
+                action: jsonData.action,
+                invoice_id: jsonData.invoice_id,
+                targetInvoiceId: invoiceId
+              })
+            }
+            
+            // Check for status updates - SECURITY: Only accept from posting authority
+            if (customJsonOp.id === 'hivevoice_status_v2' && 
+                jsonData.action === 'update_invoice_status' &&
+                jsonData.invoice_id === invoiceId &&
+                customJsonOp.required_posting_auths.includes(jsonData.creator)) {
+              
+              // Verify the operation was actually signed by the claimed creator
+              if (customJsonOp.required_posting_auths.length === 1 && 
+                  customJsonOp.required_posting_auths[0] === jsonData.creator) {
+                
+                statusUpdates.push({
+                  status: jsonData.new_status,
+                  timestamp: jsonData.created_timestamp,
+                  paymentDetails: jsonData.payment_details,
+                  txId: transactionData.trx_id || 'unknown',
+                  creator: jsonData.creator
+                })
+                
+                console.log('✅ Found invoice status update:', {
+                  invoiceId,
+                  status: jsonData.new_status,
+                  timestamp: jsonData.created_timestamp,
+                  creator: jsonData.creator
+                })
+              }
+            }
+          } catch {
+            // Skip malformed JSON
+            continue
+          }
+        }
+      }
+
+      // Sort by timestamp (oldest first)
+      statusUpdates.sort((a, b) => a.timestamp - b.timestamp)
+
+      console.log('✅ Retrieved invoice status updates from blockchain:', {
+        invoiceId,
+        updatesFound: statusUpdates.length,
+        totalCustomJsons: customJsonCount,
+        totalHivevoiceOps: hivevoiceCount
+      })
+
+      return statusUpdates
+
+    } catch (error) {
+      console.error('❌ Failed to fetch invoice status updates from blockchain:', error)
+      throw new Error(`Failed to fetch invoice status updates: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
 }
 
 // Create singleton instance lazily
