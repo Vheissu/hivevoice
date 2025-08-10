@@ -75,7 +75,7 @@ export class PaymentMonitorService {
       }
 
       // Process blocks in batches to avoid overwhelming the API
-      const maxBlocksPerBatch = 20
+      const maxBlocksPerBatch = 200
       const endBlock = Math.min(this.lastProcessedBlock + maxBlocksPerBatch, currentBlock)
 
       for (let blockNum = this.lastProcessedBlock + 1; blockNum <= endBlock; blockNum++) {

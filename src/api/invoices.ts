@@ -9,6 +9,42 @@ import { hiveService } from '../services/hive.js'
 import { currencyService } from '../services/currency.js'
 import { decryptJSON, MemoCryptoError } from '../utils/memo-crypto.js'
 
+/**
+ * Reconstructs invoice data from custom JSON encrypted payloads
+ * @param encryptedPayloads - Array of encrypted payloads [header, ...items]
+ * @param clientPublicMemoKey - Client's public memo key for decryption
+ * @returns Reconstructed invoice data
+ */
+function reconstructInvoiceFromCustomJSON(encryptedPayloads: string[], clientPublicMemoKey: string): Partial<Invoice> {
+  if (!encryptedPayloads.length || !process.env.HIVE_MEMO_KEY) {
+    throw new Error('Missing encrypted payloads or server memo key')
+  }
+
+  // Decrypt header (first payload)
+  const headerData = decryptJSON(
+    encryptedPayloads[0],
+    process.env.HIVE_MEMO_KEY,
+    clientPublicMemoKey
+  ) as Partial<Invoice>
+
+  // Decrypt items (remaining payloads)
+  const items: any[] = []
+  for (let i = 1; i < encryptedPayloads.length; i++) {
+    const itemData = decryptJSON(
+      encryptedPayloads[i],
+      process.env.HIVE_MEMO_KEY,
+      clientPublicMemoKey
+    )
+    items.push(itemData)
+  }
+
+  // Combine header and items
+  return {
+    ...headerData,
+    items: items as any[]
+  }
+}
+
 const invoices = new Hono()
 
 // Public endpoints (no auth required)
@@ -111,20 +147,42 @@ async function buildInvoiceResponse(invoiceData: any, items: any[]): Promise<Inv
       const clientPublicMemoKey = await hiveService.instance.getMemoPublicKey(invoiceData.client_hive_address)
       
       if (clientPublicMemoKey && process.env.HIVE_MEMO_KEY) {
-        // Decrypt using server private memo key and client public memo key
-        const decryptedData = decryptJSON(
-          invoiceData.encrypted_data,
-          process.env.HIVE_MEMO_KEY, // server private memo key
-          clientPublicMemoKey // client public memo key
-        ) as Partial<Invoice>
+        // Check if this is custom JSON format (contains delimiter)
+        if (invoiceData.encrypted_data.includes('||')) {
+          // New custom JSON format - split and reconstruct
+          const encryptedPayloads = invoiceData.encrypted_data.split('||')
+          const decryptedData = reconstructInvoiceFromCustomJSON(encryptedPayloads, clientPublicMemoKey)
+          
+          // Merge decrypted fields with base invoice, but preserve current status from database
+          const currentStatus = invoice.status // Preserve database status (updated by payment monitor)
+          invoice = { ...invoice, ...decryptedData }
+          invoice.status = currentStatus // Restore current status (don't overwrite with blockchain status)
+          
+          console.log('✅ Successfully decrypted custom JSON invoice data:', {
+            invoiceId: invoiceData.id,
+            payloadCount: encryptedPayloads.length,
+            decryptedFields: Object.keys(decryptedData),
+            statusPreserved: currentStatus
+          })
+        } else {
+          // Legacy post format - single encrypted payload
+          const decryptedData = decryptJSON(
+            invoiceData.encrypted_data,
+            process.env.HIVE_MEMO_KEY, // server private memo key
+            clientPublicMemoKey // client public memo key
+          ) as Partial<Invoice>
 
-        // Merge decrypted fields with base invoice
-        invoice = { ...invoice, ...decryptedData }
-        
-        console.log('✅ Successfully decrypted invoice data:', {
-          invoiceId: invoiceData.id,
-          decryptedFields: Object.keys(decryptedData)
-        })
+          // Merge decrypted fields with base invoice, but preserve current status from database
+          const currentStatus = invoice.status // Preserve database status (updated by payment monitor)
+          invoice = { ...invoice, ...decryptedData }
+          invoice.status = currentStatus // Restore current status (don't overwrite with blockchain status)
+          
+          console.log('✅ Successfully decrypted legacy post invoice data:', {
+            invoiceId: invoiceData.id,
+            decryptedFields: Object.keys(decryptedData),
+            statusPreserved: currentStatus
+          })
+        }
       } else {
         console.warn('⚠️ Cannot decrypt - missing client public memo key:', {
           invoiceId: invoiceData.id,
@@ -153,7 +211,22 @@ async function buildInvoiceResponse(invoiceData: any, items: any[]): Promise<Inv
         hiveTransactionId: invoiceData.hive_transaction_id
       })
 
-      const encryptedPayload = await hiveService.instance.fetchEncryptedInvoice(invoiceData.id)
+      // Try custom JSON first, then fall back to posts
+      let encryptedPayload: string | null = null
+      try {
+        const customJsonData = await hiveService.instance.fetchEncryptedInvoiceFromCustomJSON(invoiceData.id)
+        if (customJsonData) {
+          // Combine payloads with delimiter for storage
+          encryptedPayload = [customJsonData.headerPayload, ...customJsonData.itemPayloads].join('||')
+        }
+      } catch (customJsonError) {
+        console.warn('Custom JSON fetch failed, trying post method:', customJsonError)
+      }
+
+      // Fall back to legacy post method if custom JSON not found
+      if (!encryptedPayload) {
+        encryptedPayload = await hiveService.instance.fetchEncryptedInvoice(invoiceData.id)
+      }
       
       if (encryptedPayload) {
         console.log('✅ Retrieved encrypted data from blockchain:', {
@@ -174,19 +247,36 @@ async function buildInvoiceResponse(invoiceData: any, items: any[]): Promise<Inv
             const clientPublicMemoKey = await hiveService.instance.getMemoPublicKey(invoiceData.client_hive_address)
             
             if (clientPublicMemoKey && process.env.HIVE_MEMO_KEY) {
-              const decryptedData = decryptJSON(
-                encryptedPayload,
-                process.env.HIVE_MEMO_KEY,
-                clientPublicMemoKey
-              ) as Partial<Invoice>
+              // Check if this is custom JSON format (contains delimiter)
+              let decryptedData: Partial<Invoice>
+              if (encryptedPayload.includes('||')) {
+                // New custom JSON format - split and reconstruct
+                const encryptedPayloads = encryptedPayload.split('||')
+                decryptedData = reconstructInvoiceFromCustomJSON(encryptedPayloads, clientPublicMemoKey)
+                
+                console.log('✅ Successfully decrypted lazy-fetched custom JSON invoice data:', {
+                  invoiceId: invoiceData.id,
+                  payloadCount: encryptedPayloads.length,
+                  decryptedFields: Object.keys(decryptedData)
+                })
+              } else {
+                // Legacy post format - single encrypted payload
+                decryptedData = decryptJSON(
+                  encryptedPayload,
+                  process.env.HIVE_MEMO_KEY,
+                  clientPublicMemoKey
+                ) as Partial<Invoice>
+                
+                console.log('✅ Successfully decrypted lazy-fetched legacy invoice data:', {
+                  invoiceId: invoiceData.id,
+                  decryptedFields: Object.keys(decryptedData)
+                })
+              }
 
-              // Merge decrypted fields
+              // Merge decrypted fields but preserve current status from database
+              const currentStatus = invoice.status // Preserve database status (updated by payment monitor)
               invoice = { ...invoice, ...decryptedData }
-              
-              console.log('✅ Successfully decrypted lazy-fetched invoice data:', {
-                invoiceId: invoiceData.id,
-                decryptedFields: Object.keys(decryptedData)
-              })
+              invoice.status = currentStatus // Restore current status (don't overwrite with blockchain status)
             } else {
               // Store encrypted data for frontend handling
               invoice.encryptedData = encryptedPayload
@@ -491,26 +581,28 @@ invoices.post('/', zValidator('json', createInvoiceSchema), async (c) => {
       dueDate: data.dueDate
     }
     
-    // Store encrypted invoice data as post on Hive blockchain (PRIMARY STORAGE)
+    // Store encrypted invoice data as custom JSON operations on Hive blockchain (PRIMARY STORAGE)
     try {
-      const { txId, encryptedPayload, permlink } = await hiveService.instance.storeEncryptedInvoice(invoice, data.clientHiveAddress)
+      const { headerTxId, itemTxIds, encryptedPayloads } = await hiveService.instance.storeEncryptedInvoiceAsCustomJSON(invoice, data.clientHiveAddress)
       
-      // Update the database with the transaction ID, permlink, and encrypted data (CACHE)
+      // Update the database with the header transaction ID and combined encrypted data (CACHE)
+      const combinedEncryptedData = encryptedPayloads.join('||') // Simple delimiter for storage
       await db.run(`
         UPDATE invoices 
-        SET hive_transaction_id = ?, hive_permlink = ?, encrypted_data = ?, updated_at = ?
+        SET hive_transaction_id = ?, encrypted_data = ?, updated_at = ?
         WHERE id = ?
-      `, [txId, permlink, encryptedPayload, new Date().toISOString(), invoiceId])
+      `, [headerTxId, combinedEncryptedData, new Date().toISOString(), invoiceId])
       
       // Update the invoice object for the response
-      invoice.hiveTransactionId = txId
+      invoice.hiveTransactionId = headerTxId
       
-      console.log('✅ Invoice encrypted and stored as Hive post (primary):', {
+      console.log('✅ Invoice encrypted and stored as custom JSON operations (primary):', {
         invoiceId,
-        txId,
-        permlink,
+        headerTxId,
+        itemTxIds,
         clientHiveAddress: data.clientHiveAddress,
-        contentSize: encryptedPayload.length
+        itemCount: invoice.items.length,
+        totalContentSize: encryptedPayloads.reduce((sum, payload) => sum + payload.length, 0)
       })
       
     } catch (encryptionError) {

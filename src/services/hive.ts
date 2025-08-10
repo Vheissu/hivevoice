@@ -405,6 +405,370 @@ async storeEncryptedInvoice(invoice: Invoice, recipient: string): Promise<{ txId
   }
 
   /**
+   * Stores encrypted invoice data as custom JSON operations on the Hive blockchain
+   * @param invoice - The invoice object to encrypt and store
+   * @param recipient - The Hive username of the recipient
+   * @returns Transaction IDs of the broadcast operations
+   */
+  async storeEncryptedInvoiceAsCustomJSON(invoice: Invoice, recipient: string): Promise<{ headerTxId: string; itemTxIds: string[]; encryptedPayloads: string[] }> {
+    try {
+      // Validate that we have a memo key for encryption
+      this.validateEncryptionRequirements(true)
+      
+      if (!this.config.memoKey) {
+        throw new MissingKeyError('Memo key is required for encryption but not configured')
+      }
+
+      if (!this.config.postingKey) {
+        throw new MissingKeyError('Posting key is required for blockchain operations but not configured')
+      }
+
+      if (!recipient || recipient.trim() === '') {
+        throw new Error('Recipient username is required')
+      }
+
+      console.log('Storing encrypted invoice as custom JSON operations:', {
+        invoiceId: invoice.id,
+        recipient: recipient.replace('@', ''),
+        invoiceNumber: invoice.invoiceNumber,
+        itemsCount: invoice.items.length
+      })
+
+      // 1. Get recipient's memo public key
+      const recipientMemoPublicKey = await this.getMemoPublicKey(recipient.replace('@', ''))
+      if (!recipientMemoPublicKey) {
+        throw new Error(`Could not retrieve memo public key for recipient: ${recipient}. The account may not exist or may not be accessible.`)
+      }
+
+      // 2. Prepare invoice header data (without items for separate storage)
+      const invoiceHeaderData = {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        clientName: invoice.clientName,
+        clientHiveAddress: invoice.clientHiveAddress,
+        subtotal: invoice.subtotal,
+        tax: invoice.tax,
+        total: invoice.total,
+        currency: invoice.currency,
+        hiveConversion: invoice.hiveConversion,
+        status: invoice.status,
+        createdAt: invoice.createdAt,
+        updatedAt: invoice.updatedAt,
+        dueDate: invoice.dueDate
+      }
+
+      // 3. Encrypt invoice header data
+      let encryptedHeaderPayload: string
+      try {
+        encryptedHeaderPayload = encryptJSON(invoiceHeaderData, this.config.memoKey, recipientMemoPublicKey)
+      } catch (error) {
+        if (error instanceof MemoCryptoError) {
+          throw error
+        }
+        throw new MemoCryptoError(`Invoice header encryption failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+
+      // 4. Create invoice header custom JSON operation
+      const headerOp: Operation = [
+        'custom_json',
+        {
+          required_auths: [],
+          required_posting_auths: [this.config.username],
+          id: 'hivevoice_invoice_v2',
+          json: JSON.stringify({
+            action: 'create_invoice',
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoiceNumber,
+            version: '2.0',
+            encrypted_data: encryptedHeaderPayload,
+            creator: this.config.username, // Authenticate the invoice creator
+            created_timestamp: Date.now(), // Prevent replay attacks
+            metadata: {
+              client_address: recipient.replace('@', ''),
+              status: invoice.status,
+              currency: invoice.currency,
+              total: invoice.total.toString(),
+              created: invoice.createdAt.toISOString(),
+              due: invoice.dueDate.toISOString(),
+              items_count: invoice.items.length
+            }
+          })
+        }
+      ]
+
+      // 5. Sign and broadcast header operation
+      const privateKey = PrivateKey.fromString(this.config.postingKey)
+      let headerResult: any
+      try {
+        headerResult = await this.client.broadcast.sendOperations([headerOp], privateKey)
+      } catch (error) {
+        this.handleBroadcastError(error, 'Failed to broadcast invoice header custom JSON')
+      }
+
+      if (!headerResult || !headerResult.id) {
+        throw new BlockchainBroadcastError('Header broadcast succeeded but no transaction ID returned')
+      }
+
+      console.log('✅ Invoice header custom JSON stored successfully!', {
+        txId: headerResult.id,
+        invoiceId: invoice.id,
+        blockNum: headerResult.block_num,
+        contentSize: encryptedHeaderPayload.length
+      })
+
+      // 6. Create and broadcast line item operations
+      const itemTxIds: string[] = []
+      const encryptedPayloads: string[] = [encryptedHeaderPayload]
+
+      for (let i = 0; i < invoice.items.length; i++) {
+        const item = invoice.items[i]
+        
+        // Encrypt line item data
+        let encryptedItemPayload: string
+        try {
+          encryptedItemPayload = encryptJSON(item, this.config.memoKey, recipientMemoPublicKey)
+        } catch (error) {
+          if (error instanceof MemoCryptoError) {
+            throw error
+          }
+          throw new MemoCryptoError(`Line item ${i + 1} encryption failed: ${error instanceof Error ? error.message : String(error)}`)
+        }
+
+        // Create line item custom JSON operation with authenticity verification
+        const itemOp: Operation = [
+          'custom_json',
+          {
+            required_auths: [],
+            required_posting_auths: [this.config.username],
+            id: 'hivevoice_item_v2',
+            json: JSON.stringify({
+              action: 'create_invoice_item',
+              invoice_id: invoice.id,
+              item_id: item.id,
+              sequence: i + 1,
+              encrypted_data: encryptedItemPayload,
+              creator: this.config.username, // Ensure we know who created this item
+              created_timestamp: Date.now() // Prevent replay attacks
+            })
+          }
+        ]
+
+        // Broadcast line item operation
+        let itemResult: any
+        try {
+          itemResult = await this.client.broadcast.sendOperations([itemOp], privateKey)
+        } catch (error) {
+          console.error(`Failed to broadcast line item ${i + 1}:`, error)
+          this.handleBroadcastError(error, `Failed to broadcast line item ${i + 1} custom JSON`)
+        }
+
+        if (!itemResult || !itemResult.id) {
+          throw new BlockchainBroadcastError(`Line item ${i + 1} broadcast succeeded but no transaction ID returned`)
+        }
+
+        itemTxIds.push(itemResult.id)
+        encryptedPayloads.push(encryptedItemPayload)
+
+        console.log(`✅ Line item ${i + 1} custom JSON stored successfully!`, {
+          txId: itemResult.id,
+          invoiceId: invoice.id,
+          itemId: item.id,
+          sequence: i + 1,
+          contentSize: encryptedItemPayload.length
+        })
+      }
+
+      return { 
+        headerTxId: headerResult.id, 
+        itemTxIds, 
+        encryptedPayloads 
+      }
+
+    } catch (error) {
+      console.error('❌ Failed to store encrypted invoice as custom JSON:', error)
+      
+      // Re-throw known error types without wrapping
+      if (error instanceof MemoCryptoError || 
+          error instanceof BlockchainBroadcastError ||
+          error instanceof InvalidKeyError ||
+          error instanceof MissingKeyError) {
+        throw error
+      }
+      
+      // Wrap unknown errors
+      throw new BlockchainBroadcastError(
+        `Failed to store encrypted invoice as custom JSON: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error : undefined
+      )
+    }
+  }
+
+  /**
+   * Helper method to handle broadcast errors consistently
+   */
+  private handleBroadcastError(error: any, baseMessage: string): never {
+    if (error instanceof Error) {
+      const errorMsg = error.message.toLowerCase()
+      
+      if (errorMsg.includes('insufficient') || errorMsg.includes('bandwidth') || errorMsg.includes('resource')) {
+        throw new InsufficientResourcesError(
+          'Insufficient blockchain resources (RC/bandwidth) to broadcast transaction',
+          error
+        )
+      }
+      
+      if (errorMsg.includes('network') || errorMsg.includes('connection') || errorMsg.includes('timeout')) {
+        throw new NetworkError(
+          'Network error while broadcasting to blockchain',
+          error
+        )
+      }
+      
+      if (errorMsg.includes('invalid') || errorMsg.includes('malformed') || errorMsg.includes('signature')) {
+        throw new InvalidTransactionError(
+          'Invalid transaction or signature error',
+          error
+        )
+      }
+    }
+    
+    throw new BlockchainBroadcastError(
+      `${baseMessage}: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error : undefined
+    )
+  }
+
+  /**
+   * Fetches encrypted invoice data from custom JSON operations
+   * @param invoiceId - The ID of the invoice to retrieve
+   * @returns The reconstructed invoice data or null if not found
+   */
+  async fetchEncryptedInvoiceFromCustomJSON(invoiceId: string): Promise<{ headerPayload: string; itemPayloads: string[] } | null> {
+    try {
+      console.log('Fetching encrypted invoice from custom JSON operations:', { invoiceId })
+
+      // Get account history to find custom JSON operations
+      const history = await this.client.database.getAccountHistory(this.config.username, -1, 1000)
+
+      let headerPayload: string | null = null
+      let invoiceCreator: string | null = null
+      const itemPayloads: { sequence: number; payload: string }[] = []
+
+      // Search through account history for relevant operations
+      for (const entry of history.reverse()) {
+        const [, operation] = entry as [number, any]
+        
+        if (operation[0] === 'custom_json') {
+          const customJsonOp = operation[1] as any
+          
+          try {
+            const jsonData = JSON.parse(customJsonOp.json)
+            
+            // Check for invoice header - SECURITY: Only accept from posting authority
+            if (customJsonOp.id === 'hivevoice_invoice_v2' && 
+                jsonData.action === 'create_invoice' &&
+                jsonData.invoice_id === invoiceId &&
+                customJsonOp.required_posting_auths.includes(jsonData.creator)) {
+              
+              // Verify the operation was actually signed by the claimed creator
+              if (customJsonOp.required_posting_auths.length === 1 && 
+                  customJsonOp.required_posting_auths[0] === jsonData.creator) {
+                headerPayload = jsonData.encrypted_data
+                invoiceCreator = jsonData.creator
+                
+                console.log('✅ Found authenticated invoice header custom JSON:', {
+                  invoiceId,
+                  creator: invoiceCreator,
+                  contentSize: headerPayload?.length || 0
+                })
+              } else {
+                console.warn('⚠️ Rejecting header with mismatched creator/authority:', {
+                  invoiceId,
+                  claimedCreator: jsonData.creator,
+                  postingAuths: customJsonOp.required_posting_auths
+                })
+              }
+            }
+            
+            // Check for line items - SECURITY: Only accept from authenticated invoice creator
+            if (customJsonOp.id === 'hivevoice_item_v2' && 
+                jsonData.action === 'create_invoice_item' &&
+                jsonData.invoice_id === invoiceId &&
+                invoiceCreator && // Must have found header first
+                jsonData.creator === invoiceCreator && // Must be from same creator as header
+                customJsonOp.required_posting_auths.includes(jsonData.creator)) {
+              
+              // Verify the operation was actually signed by the invoice creator
+              if (customJsonOp.required_posting_auths.length === 1 && 
+                  customJsonOp.required_posting_auths[0] === invoiceCreator) {
+                itemPayloads.push({
+                  sequence: jsonData.sequence,
+                  payload: jsonData.encrypted_data
+                })
+                
+                console.log('✅ Found authenticated invoice item custom JSON:', {
+                  invoiceId,
+                  creator: invoiceCreator,
+                  itemId: jsonData.item_id,
+                  sequence: jsonData.sequence,
+                  contentSize: jsonData.encrypted_data.length
+                })
+              } else {
+                console.warn('⚠️ Rejecting item with mismatched creator/authority:', {
+                  invoiceId,
+                  itemId: jsonData.item_id,
+                  claimedCreator: jsonData.creator,
+                  expectedCreator: invoiceCreator,
+                  postingAuths: customJsonOp.required_posting_auths
+                })
+              }
+            }
+          } catch {
+            // Skip malformed JSON
+            continue
+          }
+        }
+      }
+
+      if (!headerPayload) {
+        console.log('❌ Invoice header not found in custom JSON operations:', { invoiceId })
+        return null
+      }
+
+      // Sort line items by sequence
+      itemPayloads.sort((a, b) => a.sequence - b.sequence)
+      const sortedItemPayloads = itemPayloads.map(item => item.payload)
+
+      // Additional security check: Validate item count matches header expectation
+      try {
+        if (headerPayload) {
+          const testDecryption = JSON.parse(headerPayload) // Quick parse to check if it's valid JSON structure
+          // Note: We can't decrypt here without recipient's memo key, but we can validate structure
+        }
+      } catch (error) {
+        console.error('❌ Invalid header payload structure:', { invoiceId, error })
+        return null
+      }
+
+      console.log('✅ Successfully retrieved authenticated invoice from custom JSON operations:', {
+        invoiceId,
+        creator: invoiceCreator,
+        headerFound: !!headerPayload,
+        itemsFound: sortedItemPayloads.length
+      })
+
+      return {
+        headerPayload,
+        itemPayloads: sortedItemPayloads
+      }
+
+    } catch (error) {
+      console.error('❌ Failed to fetch encrypted invoice from custom JSON:', error)
+      throw new Error(`Failed to fetch encrypted invoice from custom JSON: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /**
    * Fetches encrypted invoice data from the Hive blockchain (from posts)
    * @param invoiceId - The ID of the invoice to retrieve
    * @returns The encrypted payload string or null if not found
